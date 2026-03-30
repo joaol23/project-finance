@@ -57,16 +57,16 @@ page = st.sidebar.radio(
 exec_globals = {"PROJECT_ROOT": PROJECT_ROOT}
 
 if page == "📊 Painel":
-    exec(open(os.path.join(PROJECT_ROOT, "views/dashboard.py")).read(), exec_globals)
+    exec(open(os.path.join(PROJECT_ROOT, "views/dashboard.py"), encoding="utf-8").read(), exec_globals)
 elif page == "💸 Transações":
-    exec(open(os.path.join(PROJECT_ROOT, "views/transactions.py")).read(), exec_globals)
+    exec(open(os.path.join(PROJECT_ROOT, "views/transactions.py"), encoding="utf-8").read(), exec_globals)
 elif page == "📁 Categorias":
-    exec(open(os.path.join(PROJECT_ROOT, "views/categories.py")).read(), exec_globals)
+    exec(open(os.path.join(PROJECT_ROOT, "views/categories.py"), encoding="utf-8").read(), exec_globals)
 elif page == "📋 Orçamentos":
-    exec(open(os.path.join(PROJECT_ROOT, "views/budgets.py")).read(), exec_globals)
+    exec(open(os.path.join(PROJECT_ROOT, "views/budgets.py"), encoding="utf-8").read(), exec_globals)
 elif page == "💳 Cartões de Crédito":
-    exec(open(os.path.join(PROJECT_ROOT, "views/credit_cards.py")).read(), exec_globals)
+    exec(open(os.path.join(PROJECT_ROOT, "views/credit_cards.py"), encoding="utf-8").read(), exec_globals)
 elif page == "📈 Investimentos":
-    exec(open(os.path.join(PROJECT_ROOT, "views/investments.py")).read(), exec_globals)
+    exec(open(os.path.join(PROJECT_ROOT, "views/investments.py"), encoding="utf-8").read(), exec_globals)
 elif page == "📥 Importar Dados":
-    exec(open(os.path.join(PROJECT_ROOT, "views/import_data.py")).read(), exec_globals)
+    exec(open(os.path.join(PROJECT_ROOT, "views/import_data.py"), encoding="utf-8").read(), exec_globals)

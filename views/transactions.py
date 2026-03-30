@@ -106,7 +106,46 @@ with tab_list:
     st.markdown(f"**{len(transactions)} transações encontradas**")
     
     if transactions:
-        for t in transactions:
+        # Pagination (reset page when filters change)
+        pagination_sig = (filter_month, filter_year, filter_type)
+        if st.session_state.get("trans_pagination_sig") != pagination_sig:
+            st.session_state.trans_pagination_sig = pagination_sig
+            st.session_state.trans_page = 1
+
+        col_pag1, col_pag2, col_pag3 = st.columns([2, 2, 2])
+        with col_pag1:
+            page_size = st.selectbox(
+                "Itens por página",
+                [10, 20, 50, 100],
+                index=1,
+                key="trans_page_size",
+            )
+        total = len(transactions)
+        total_pages = max(1, (total + page_size - 1) // page_size)
+        current_page = int(st.session_state.get("trans_page", 1))
+        current_page = max(1, min(current_page, total_pages))
+        st.session_state.trans_page = current_page
+
+        with col_pag2:
+            current_page = st.number_input(
+                "Página",
+                min_value=1,
+                max_value=total_pages,
+                value=current_page,
+                step=1,
+                key="trans_page_input",
+            )
+            st.session_state.trans_page = int(current_page)
+
+        start_idx = (st.session_state.trans_page - 1) * page_size
+        end_idx = min(start_idx + page_size, total)
+
+        with col_pag3:
+            st.markdown(f"Mostrando **{start_idx + 1}–{end_idx}** de **{total}**")
+
+        page_transactions = transactions[start_idx:end_idx]
+
+        for t in page_transactions:
             with st.container():
                 col1, col2, col3, col4, col5 = st.columns([2, 3, 2, 2, 1])
                 with col1:

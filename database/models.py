@@ -1,7 +1,7 @@
 from datetime import date
 from decimal import Decimal
 from typing import Optional, List
-from sqlalchemy import String, Integer, Date, Numeric, ForeignKey, Text, Enum as SQLEnum, create_engine
+from sqlalchemy import String, Integer, Date, Numeric, ForeignKey, Text, Enum as SQLEnum, create_engine, UniqueConstraint
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 import enum
 
@@ -36,6 +36,19 @@ class Account(Base):
     initial_balance: Mapped[Decimal] = mapped_column(Numeric(15, 2), default=0)
     
     transactions: Mapped[List["Transaction"]] = relationship(back_populates="account", cascade="all, delete-orphan")
+
+
+class MonthlyOpeningBalance(Base):
+    __tablename__ = "monthly_opening_balances"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    year: Mapped[int] = mapped_column(Integer, nullable=False)
+    month: Mapped[int] = mapped_column(Integer, nullable=False)  # 1..12
+    initial_balance: Mapped[Decimal] = mapped_column(Numeric(15, 2), default=0)
+
+    __table_args__ = (
+        UniqueConstraint("year", "month", name="uq_monthly_opening_balance_year_month"),
+    )
 
 
 class Category(Base):

@@ -2,10 +2,10 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from decimal import Decimal
 from database import get_session
-from database.models import Transaction, TransactionType, Category, CategoryType, Account, CreditCardTransaction, Budget
+from database.models import Transaction, TransactionType, Category, CategoryType, Account, CreditCardTransaction, Budget, MonthlyOpeningBalance
 
 st.title("📊 Painel")
 
@@ -13,6 +13,47 @@ session = get_session()
 
 today = date.today()
 col_filter1, col_filter2 = st.columns(2)
+
+def last_business_day(year: int, month: int) -> date:
+    """
+    Retorna o último dia útil do mês.
+
+    Nota: aqui consideramos como "dia útil" apenas de segunda a sexta, com uma exceção
+    prática comum em fechamentos bancários: 31/12 é tratado como não útil.
+    """
+    # Último dia do mês (dia anterior ao primeiro dia do mês seguinte)
+    if month == 12:
+        last_day = date(year + 1, 1, 1) - timedelta(days=1)
+    else:
+        last_day = date(year, month + 1, 1) - timedelta(days=1)
+
+    d = last_day
+    while True:
+        # weekday(): Monday=0 ... Sunday=6
+        if d.weekday() < 5:
+            # Ajuste para o exemplo informado: 31/12 costuma ser considerado "fora do útil"
+            if not (d.month == 12 and d.day == 31):
+                return d
+        d -= timedelta(days=1)
+
+def month_period_bounds(year: int, month: int) -> tuple[date, date]:
+    """
+    Para o mês selecionado, define:
+      início (marco) = último dia útil do mês anterior
+      fim            = último dia útil do mês selecionado
+
+    Regra de contagem (sem sobreposição):
+      período do mês = (início, fim]  -> exclusivo no início, inclusivo no fim
+    """
+    if month == 1:
+        prev_year, prev_month = year - 1, 12
+    else:
+        prev_year, prev_month = year, month - 1
+
+    start_boundary = last_business_day(prev_year, prev_month)
+    end_boundary = last_business_day(year, month)
+    return start_boundary, end_boundary
+
 with col_filter1:
     selected_month = st.selectbox("Mês", range(1, 13), index=today.month - 1, 
                                    format_func=lambda x: ["Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho",
@@ -21,32 +62,114 @@ with col_filter2:
     years = list(range(2020, today.year + 2))
     selected_year = st.selectbox("Ano", years, index=years.index(today.year))
 
+period_start_boundary, period_end = month_period_bounds(selected_year, selected_month)
+period_start = period_start_boundary
+
 account = session.query(Account).first()
-initial_balance = float(account.initial_balance) if account else 0
+account_initial_balance = Decimal(str(account.initial_balance)) if account else Decimal("0")
 
 transactions = session.query(Transaction).filter(
-    Transaction.date >= date(selected_year, selected_month, 1),
-    Transaction.date < date(selected_year + (1 if selected_month == 12 else 0), 
-                           (selected_month % 12) + 1, 1)
+    Transaction.date >= period_start_boundary,
+    Transaction.date <= period_end
 ).all()
 
-total_income = sum(float(t.amount) for t in transactions if t.transaction_type == TransactionType.INCOME)
-total_expense = sum(float(t.amount) for t in transactions if t.transaction_type == TransactionType.EXPENSE)
+total_income = sum(Decimal(str(t.amount)) for t in transactions if t.transaction_type == TransactionType.INCOME)
+total_expense = sum(Decimal(str(t.amount)) for t in transactions if t.transaction_type == TransactionType.EXPENSE)
 
 prev_transactions = session.query(Transaction).filter(
-    Transaction.date < date(selected_year, selected_month, 1)
+    Transaction.date < period_start_boundary
 ).all()
-prev_balance = initial_balance
+prev_balance = account_initial_balance
 for t in prev_transactions:
     if t.transaction_type == TransactionType.INCOME:
-        prev_balance += float(t.amount)
+        prev_balance += Decimal(str(t.amount))
     else:
-        prev_balance -= float(t.amount)
+        prev_balance -= Decimal(str(t.amount))
 
-opening_balance = prev_balance
-closing_balance = opening_balance + total_income - total_expense
+#
+# Sugestão do saldo inicial:
+# - Se existir "saldo inicial manual" salvo para o mês anterior, a sugestão do mês atual
+#   será o "saldo final" do mês anterior calculado com o saldo inicial manual.
+# - Caso contrário, usamos a sugestão automática (acumulado até o marco contábil).
+#
+prev_year = selected_year - 1 if selected_month == 1 else selected_year
+prev_month = 12 if selected_month == 1 else (selected_month - 1)
+
+prev_month_record = session.query(MonthlyOpeningBalance).filter_by(
+    year=prev_year,
+    month=prev_month,
+).first()
+
+if prev_month_record:
+    suggestion_source = f"saldo manual salvo em {prev_month:02d}/{prev_year}"
+    prev_start_boundary, prev_end_boundary = month_period_bounds(prev_year, prev_month)
+
+    prev_month_transactions = session.query(Transaction).filter(
+        Transaction.date >= prev_start_boundary,
+        # Importante: evitamos duplicidade do "dia de virada" (fim do mês anterior),
+        # já que ele é o início do mês atual.
+        Transaction.date < prev_end_boundary,
+    ).all()
+
+    prev_month_income = sum(
+        Decimal(str(t.amount)) for t in prev_month_transactions
+        if t.transaction_type == TransactionType.INCOME
+    )
+    prev_month_expense = sum(
+        Decimal(str(t.amount)) for t in prev_month_transactions
+        if t.transaction_type == TransactionType.EXPENSE
+    )
+
+    prev_month_closing = Decimal(str(prev_month_record.initial_balance)) + prev_month_income - prev_month_expense
+    suggested_opening_balance = prev_month_closing
+else:
+    suggestion_source = "acumulado automático até o marco"
+    suggested_opening_balance = prev_balance
 
 st.markdown("### Resumo do Mês")
+st.caption(
+    f"Período contábil: {period_start:%d/%m/%Y} até {period_end:%d/%m/%Y}"
+)
+
+monthly_record = session.query(MonthlyOpeningBalance).filter_by(
+    year=selected_year,
+    month=selected_month,
+).first()
+
+default_opening = float(monthly_record.initial_balance) if monthly_record else float(suggested_opening_balance)
+
+st.caption(f"Dica (sugestão): R$ {suggested_opening_balance:,.2f} — fonte: {suggestion_source}")
+st.caption(f"Este saldo vale para o início do período contábil ({period_start:%d/%m/%Y}).")
+
+manual_opening_balance = st.number_input(
+    "Saldo Inicial (manual)",
+    value=default_opening,
+    step=0.01,
+    format="%.2f",
+    key=f"manual_opening_{selected_year}_{selected_month}",
+)
+
+if st.button(
+    "Salvar saldo inicial",
+    key=f"save_manual_opening_{selected_year}_{selected_month}",
+    type="primary",
+):
+    new_value = Decimal(str(manual_opening_balance))
+    if monthly_record:
+        monthly_record.initial_balance = new_value
+    else:
+        monthly_record = MonthlyOpeningBalance(
+            year=selected_year,
+            month=selected_month,
+            initial_balance=new_value,
+        )
+        session.add(monthly_record)
+    session.commit()
+    st.toast("✅ Saldo inicial salvo", icon="✅")
+
+opening_balance = Decimal(str(manual_opening_balance))
+closing_balance = opening_balance + total_income - total_expense
+
 col1, col2, col3, col4, col5 = st.columns(5)
 
 with col1:
@@ -175,9 +298,8 @@ st.markdown("---")
 st.markdown("### Gastos no Cartão de Crédito")
 
 cc_transactions = session.query(CreditCardTransaction).filter(
-    CreditCardTransaction.date >= date(selected_year, selected_month, 1),
-    CreditCardTransaction.date < date(selected_year + (1 if selected_month == 12 else 0), 
-                                      (selected_month % 12) + 1, 1)
+    CreditCardTransaction.date > period_start_boundary,
+    CreditCardTransaction.date <= period_end
 ).all()
 
 total_cc = sum(float(t.amount) for t in cc_transactions)

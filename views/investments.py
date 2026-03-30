@@ -187,7 +187,7 @@ with tab_portfolio:
                         step=0.01,
                         format="%.2f",
                         value=float(inv.current_price) if inv.current_price else 0.0,
-                        key=f"price_{inv.id}"
+                        key=f"inv_price_{inv.id}"
                     )
                 with col8:
                     st.markdown("&nbsp;", unsafe_allow_html=True)
@@ -244,7 +244,7 @@ with tab_pending:
                         min_value=0.0,
                         step=0.01,
                         format="%.2f",
-                        key=f"price_{t.id}",
+                        key=f"pending_price_{t.id}",
                         value=suggested_price
                     )
                 
