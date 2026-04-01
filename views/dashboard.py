@@ -184,13 +184,25 @@ with col3:
 
 with col4:
     delta = closing_balance - opening_balance
+    
     if closing_balance < 0:
-        delta_color = "inverse" if delta > 0 else "normal"
+        st.markdown("**Saldo Final**")
+        st.markdown(f":red[**R$ {closing_balance:,.2f}**]")
+        if delta != 0:
+            delta_icon = "🔻" if delta < 0 else "↗️"
+            st.markdown(f":red[{delta_icon} R$ {delta:+,.2f}]")
+    elif closing_balance == 0:
+        st.metric("Saldo Final", f"R$ {closing_balance:,.2f}", 
+                  delta=f"R$ {delta:+,.2f}" if delta != 0 else None,
+                  delta_color="off")
     else:
-        delta_color = "normal"
-    st.metric("Saldo Final", f"R$ {closing_balance:,.2f}", 
-              delta=f"R$ {delta:+,.2f}" if delta != 0 else None,
-              delta_color=delta_color)
+        if delta >= 0:
+            delta_color = "normal"
+        else:
+            delta_color = "inverse"
+        st.metric("Saldo Final", f"R$ {closing_balance:,.2f}", 
+                  delta=f"R$ {delta:+,.2f}" if delta != 0 else None,
+                  delta_color=delta_color)
 
 with col5:
     if opening_balance != 0:
@@ -198,9 +210,20 @@ with col5:
     else:
         pct_change = 100 if closing_balance > 0 else (-100 if closing_balance < 0 else 0)
     
-    st.metric("Variação", f"{pct_change:+.1f}%", 
-              delta=f"{pct_change:+.1f}%" if pct_change != 0 else None,
-              delta_color="normal")
+    if closing_balance < 0:
+        st.markdown("**Variação**")
+        st.markdown(f":red[**{pct_change:+.1f}%**]")
+    else:
+        if pct_change > 0:
+            var_delta_color = "normal"
+        elif pct_change < 0:
+            var_delta_color = "inverse"
+        else:
+            var_delta_color = "off"
+        
+        st.metric("Variação", f"{pct_change:+.1f}%", 
+                  delta=f"{pct_change:+.1f}%" if pct_change != 0 else None,
+                  delta_color=var_delta_color)
 
 st.markdown("---")
 

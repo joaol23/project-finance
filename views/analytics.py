@@ -129,13 +129,14 @@ else:
 
 st.markdown("---")
 
-tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
+tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
     "🏆 Top Gastos",
     "📈 Evolução Mensal",
     "🎯 Orçamento vs Real",
     "⚠️ Gastos Anômalos",
     "📊 Análise Pareto",
-    "💳 Por Cartão"
+    "💳 Por Cartão",
+    "💰 Análise de Receitas"
 ])
 
 with tab1:
@@ -494,5 +495,243 @@ with tab6:
         st.info("💡 Para análise detalhada por categoria, selecione **💳 Cartão de Crédito** no filtro acima e veja as outras abas.")
     else:
         st.info("Nenhuma transação de cartão de crédito encontrada no período")
+
+with tab7:
+    st.markdown("### Análise de Receitas (Entradas)")
+    st.markdown("Insights detalhados sobre suas fontes de renda.")
+    
+    if income_transactions:
+        income_by_cat = {}
+        for t in income_transactions:
+            if t.category:
+                cat_name = t.category.name
+                income_by_cat[cat_name] = income_by_cat.get(cat_name, 0) + float(t.amount)
+            else:
+                income_by_cat["Sem categoria"] = income_by_cat.get("Sem categoria", 0) + float(t.amount)
+        
+        col_inc1, col_inc2, col_inc3, col_inc4 = st.columns(4)
+        with col_inc1:
+            st.metric("Total de Entradas", f"R$ {total_income:,.2f}")
+        with col_inc2:
+            avg_income = total_income / len(income_transactions) if income_transactions else 0
+            st.metric("Média por Transação", f"R$ {avg_income:,.2f}")
+        with col_inc3:
+            st.metric("Qtd. Transações", len(income_transactions))
+        with col_inc4:
+            num_sources = len(income_by_cat)
+            st.metric("Fontes de Receita", num_sources)
+        
+        st.markdown("---")
+        
+        col_chart1, col_chart2 = st.columns(2)
+        
+        with col_chart1:
+            st.markdown("#### Top Fontes de Receita")
+            if income_by_cat:
+                sorted_income = sorted(income_by_cat.items(), key=lambda x: x[1], reverse=True)[:10]
+                df_income = pd.DataFrame(sorted_income, columns=["Categoria", "Valor"])
+                
+                fig_income = px.bar(
+                    df_income,
+                    x="Valor",
+                    y="Categoria",
+                    orientation="h",
+                    color="Valor",
+                    color_continuous_scale=[[0, '#059669'], [0.5, '#10b981'], [1, '#34d399']]
+                )
+                fig_income.update_layout(
+                    paper_bgcolor='rgba(0,0,0,0)',
+                    plot_bgcolor='rgba(0,0,0,0)',
+                    font_color='#f5f5f5',
+                    yaxis={'categoryorder': 'total ascending', 'color': '#9ca3af'},
+                    xaxis={'color': '#9ca3af'},
+                    showlegend=False,
+                    coloraxis_showscale=False,
+                    height=350
+                )
+                st.plotly_chart(fig_income, use_container_width=True)
+        
+        with col_chart2:
+            st.markdown("#### Distribuição por Fonte")
+            if income_by_cat:
+                green_palette = ['#22c55e', '#4ade80', '#86efac', '#10b981', '#34d399', '#6ee7b7']
+                fig_pie = px.pie(
+                    values=list(income_by_cat.values()),
+                    names=list(income_by_cat.keys()),
+                    hole=0.4,
+                    color_discrete_sequence=green_palette
+                )
+                fig_pie.update_layout(
+                    paper_bgcolor='rgba(0,0,0,0)',
+                    plot_bgcolor='rgba(0,0,0,0)',
+                    font_color='#f5f5f5',
+                    legend=dict(font=dict(color='#9ca3af')),
+                    height=350
+                )
+                st.plotly_chart(fig_pie, use_container_width=True)
+        
+        st.markdown("---")
+        st.markdown("#### Evolução Mensal das Receitas")
+        
+        monthly_income = {}
+        for t in income_transactions:
+            month_key = t.date.strftime("%Y-%m")
+            cat_name = t.category.name if t.category else "Sem categoria"
+            
+            if month_key not in monthly_income:
+                monthly_income[month_key] = {}
+            monthly_income[month_key][cat_name] = monthly_income[month_key].get(cat_name, 0) + float(t.amount)
+        
+        if monthly_income:
+            all_income_cats = set()
+            for month_cats in monthly_income.values():
+                all_income_cats.update(month_cats.keys())
+            
+            income_rows = []
+            for month, cats in sorted(monthly_income.items()):
+                for cat in all_income_cats:
+                    income_rows.append({
+                        "Mês": month,
+                        "Categoria": cat,
+                        "Valor": cats.get(cat, 0)
+                    })
+            
+            df_income_monthly = pd.DataFrame(income_rows)
+            
+            top_income_cats = list(income_by_cat.keys())[:5] if income_by_cat else []
+            selected_income_cats = st.multiselect(
+                "Selecione categorias para visualizar",
+                sorted(all_income_cats),
+                default=top_income_cats,
+                key="income_monthly_cats"
+            )
+            
+            if selected_income_cats:
+                df_filtered_income = df_income_monthly[df_income_monthly["Categoria"].isin(selected_income_cats)]
+                
+                green_sequence = ['#22c55e', '#10b981', '#059669', '#047857', '#065f46', '#064e3b']
+                fig_income_line = px.line(
+                    df_filtered_income,
+                    x="Mês",
+                    y="Valor",
+                    color="Categoria",
+                    markers=True,
+                    color_discrete_sequence=green_sequence
+                )
+                fig_income_line.update_layout(
+                    paper_bgcolor='rgba(0,0,0,0)',
+                    plot_bgcolor='rgba(0,0,0,0)',
+                    font_color='#f5f5f5',
+                    xaxis=dict(showgrid=False, color='#9ca3af'),
+                    yaxis=dict(showgrid=True, gridcolor='rgba(255,255,255,0.05)', color='#9ca3af'),
+                    legend=dict(font=dict(color='#9ca3af')),
+                    height=350
+                )
+                st.plotly_chart(fig_income_line, use_container_width=True)
+        
+        st.markdown("---")
+        st.markdown("#### Receitas vs Despesas")
+        
+        monthly_totals = {}
+        for t in transactions:
+            month_key = t.date.strftime("%Y-%m")
+            if month_key not in monthly_totals:
+                monthly_totals[month_key] = {"Receitas": 0, "Despesas": 0}
+            
+            if t.transaction_type == TransactionType.INCOME:
+                monthly_totals[month_key]["Receitas"] += float(t.amount)
+            else:
+                monthly_totals[month_key]["Despesas"] += float(t.amount)
+        
+        if monthly_totals:
+            comparison_rows = []
+            for month in sorted(monthly_totals.keys()):
+                data = monthly_totals[month]
+                comparison_rows.append({
+                    "Mês": month,
+                    "Receitas": data["Receitas"],
+                    "Despesas": data["Despesas"],
+                    "Saldo": data["Receitas"] - data["Despesas"]
+                })
+            
+            df_comparison = pd.DataFrame(comparison_rows)
+            
+            fig_comparison = go.Figure()
+            fig_comparison.add_trace(go.Bar(
+                name='Receitas',
+                x=df_comparison['Mês'],
+                y=df_comparison['Receitas'],
+                marker_color='#22c55e'
+            ))
+            fig_comparison.add_trace(go.Bar(
+                name='Despesas',
+                x=df_comparison['Mês'],
+                y=df_comparison['Despesas'],
+                marker_color='#ef4444'
+            ))
+            fig_comparison.add_trace(go.Scatter(
+                name='Saldo',
+                x=df_comparison['Mês'],
+                y=df_comparison['Saldo'],
+                mode='lines+markers',
+                line=dict(color='#9333ea', width=3),
+                marker=dict(size=8)
+            ))
+            
+            fig_comparison.update_layout(
+                barmode='group',
+                paper_bgcolor='rgba(0,0,0,0)',
+                plot_bgcolor='rgba(0,0,0,0)',
+                font_color='#f5f5f5',
+                xaxis=dict(showgrid=False, color='#9ca3af'),
+                yaxis=dict(showgrid=True, gridcolor='rgba(255,255,255,0.05)', color='#9ca3af', title='R$'),
+                legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1, font=dict(color='#9ca3af')),
+                height=400
+            )
+            fig_comparison.add_hline(y=0, line_dash="dash", line_color="#9ca3af")
+            st.plotly_chart(fig_comparison, use_container_width=True)
+            
+            positive_months = sum(1 for row in comparison_rows if row["Saldo"] > 0)
+            negative_months = sum(1 for row in comparison_rows if row["Saldo"] < 0)
+            total_months = len(comparison_rows)
+            
+            col_stat1, col_stat2, col_stat3 = st.columns(3)
+            with col_stat1:
+                st.metric("Meses Positivos", f"{positive_months}/{total_months}", 
+                         delta=f"{positive_months/total_months*100:.0f}%" if total_months > 0 else "0%",
+                         delta_color="normal")
+            with col_stat2:
+                st.metric("Meses Negativos", f"{negative_months}/{total_months}",
+                         delta=f"{negative_months/total_months*100:.0f}%" if total_months > 0 else "0%",
+                         delta_color="inverse")
+            with col_stat3:
+                avg_monthly_balance = sum(row["Saldo"] for row in comparison_rows) / total_months if total_months > 0 else 0
+                balance_color = "normal" if avg_monthly_balance >= 0 else "inverse"
+                st.metric("Saldo Médio Mensal", f"R$ {avg_monthly_balance:,.2f}",
+                         delta_color=balance_color)
+        
+        st.markdown("---")
+        st.markdown("#### Detalhamento por Fonte de Receita")
+        
+        for cat, value in sorted(income_by_cat.items(), key=lambda x: x[1], reverse=True):
+            pct = (value / total_income * 100) if total_income > 0 else 0
+            cat_transactions = [t for t in income_transactions if (t.category.name if t.category else "Sem categoria") == cat]
+            avg_value = value / len(cat_transactions) if cat_transactions else 0
+            
+            with st.expander(f"💵 {cat} - R$ {value:,.2f} ({pct:.1f}%)"):
+                col1, col2, col3 = st.columns(3)
+                with col1:
+                    st.metric("Total", f"R$ {value:,.2f}")
+                with col2:
+                    st.metric("Transações", len(cat_transactions))
+                with col3:
+                    st.metric("Média", f"R$ {avg_value:,.2f}")
+                
+                st.markdown("**Últimas transações:**")
+                for t in sorted(cat_transactions, key=lambda x: x.date, reverse=True)[:5]:
+                    st.markdown(f"- {t.date.strftime('%d/%m/%Y')}: R$ {float(t.amount):,.2f} - {t.description}")
+    else:
+        st.info("Nenhuma receita registrada no período selecionado.")
+        st.markdown("Registre transações do tipo **Entrada** para ver análises de receitas.")
 
 session.close()

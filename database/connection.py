@@ -28,6 +28,7 @@ def _seed_initial_data():
                 Category(name="Salário", category_type=CategoryType.INCOME, color="#22c55e"),
                 Category(name="Freelance", category_type=CategoryType.INCOME, color="#10b981"),
                 Category(name="Dividendos", category_type=CategoryType.INCOME, color="#06b6d4", is_investment=True),
+                Category(name="Ações vendidas", category_type=CategoryType.INCOME, color="#7c3aed", is_investment=True),
                 Category(name="Outros (Entrada)", category_type=CategoryType.INCOME, color="#14b8a6"),
                 Category(name="Alimentação", category_type=CategoryType.EXPENSE, color="#ef4444"),
                 Category(name="Transporte", category_type=CategoryType.EXPENSE, color="#f97316"),
