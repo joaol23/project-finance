@@ -4,13 +4,22 @@ from database import get_session
 from database.models import Budget, Category, CategoryType
 
 st.title("📋 Orçamentos")
-
-st.markdown("""
-Os orçamentos são **globais** - defina o valor planejado para cada categoria de despesa.
-Você pode ajustar os valores a qualquer momento.
-""")
+st.caption("Defina limites de gastos por categoria")
 
 session = get_session()
+
+if "budget_saved" not in st.session_state:
+    st.session_state.budget_saved = False
+if "budget_saved_name" not in st.session_state:
+    st.session_state.budget_saved_name = None
+
+if st.session_state.budget_saved:
+    if st.session_state.budget_saved_name:
+        st.toast(f"✅ Orçamento de {st.session_state.budget_saved_name} salvo!", icon="✅")
+    else:
+        st.toast("✅ Todos os orçamentos foram salvos!", icon="✅")
+    st.session_state.budget_saved = False
+    st.session_state.budget_saved_name = None
 
 expense_categories = session.query(Category).filter(Category.category_type == CategoryType.EXPENSE).all()
 cc_categories = session.query(Category).filter(Category.category_type == CategoryType.CREDIT_CARD).all()
@@ -27,8 +36,8 @@ for cat in expense_categories:
     col1, col2, col3 = st.columns([3, 2, 1])
     with col1:
         st.markdown(f"<div style='display:flex; align-items:center; height:40px;'>"
-                   f"<div style='width:20px; height:20px; background-color:{cat.color or '#ef4444'}; border-radius:3px; margin-right:10px;'></div>"
-                   f"<span>{cat.name}</span></div>", unsafe_allow_html=True)
+                   f"<div style='width:20px; height:20px; background-color:{cat.color or '#9333ea'}; border-radius:3px; margin-right:10px;'></div>"
+                   f"<span style='color:#f5f5f5;'>{cat.name}</span></div>", unsafe_allow_html=True)
     with col2:
         new_value = st.number_input(
             "Valor Planejado (R$)",
@@ -50,7 +59,8 @@ for cat in expense_categories:
                 )
                 session.add(new_budget)
             session.commit()
-            st.success(f"✅ Orçamento de {cat.name} salvo!")
+            st.session_state.budget_saved = True
+            st.session_state.budget_saved_name = cat.name
             st.rerun()
 
 st.markdown("---")
@@ -64,8 +74,8 @@ for cat in cc_categories:
     col1, col2, col3 = st.columns([3, 2, 1])
     with col1:
         st.markdown(f"<div style='display:flex; align-items:center; height:40px;'>"
-                   f"<div style='width:20px; height:20px; background-color:{cat.color or '#e94560'}; border-radius:3px; margin-right:10px;'></div>"
-                   f"<span>{cat.name}</span></div>", unsafe_allow_html=True)
+                   f"<div style='width:20px; height:20px; background-color:{cat.color or '#a855f7'}; border-radius:3px; margin-right:10px;'></div>"
+                   f"<span style='color:#f5f5f5;'>{cat.name}</span></div>", unsafe_allow_html=True)
     with col2:
         new_value = st.number_input(
             "Valor Planejado (R$)",
@@ -87,7 +97,8 @@ for cat in cc_categories:
                 )
                 session.add(new_budget)
             session.commit()
-            st.success(f"✅ Orçamento de {cat.name} salvo!")
+            st.session_state.budget_saved = True
+            st.session_state.budget_saved_name = cat.name
             st.rerun()
 
 st.markdown("---")
@@ -108,7 +119,8 @@ if st.button("💾 Salvar Todos", type="primary", use_container_width=True):
                 )
                 session.add(new_budget)
     session.commit()
-    st.success("✅ Todos os orçamentos foram salvos!")
+    st.session_state.budget_saved = True
+    st.session_state.budget_saved_name = None
     st.rerun()
 
 session.close()

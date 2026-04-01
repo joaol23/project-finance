@@ -1,8 +1,10 @@
 import streamlit as st
+from sqlalchemy import func
 from database import get_session
-from database.models import Category, CategoryType
+from database.models import Category, CategoryType, Transaction, CreditCardTransaction
 
 st.title("📁 Categorias")
+st.caption("Organize suas transações por categorias")
 
 session = get_session()
 
@@ -14,6 +16,12 @@ type_labels = {
 
 if "cat_saved" not in st.session_state:
     st.session_state.cat_saved = False
+if "cat_updated" not in st.session_state:
+    st.session_state.cat_updated = False
+
+if st.session_state.cat_updated:
+    st.toast("✅ Categoria atualizada!", icon="✅")
+    st.session_state.cat_updated = False
 
 def clear_category_form():
     keys_to_clear = ["new_cat_name", "new_cat_type", "new_cat_color"]
@@ -38,7 +46,7 @@ with tab_add:
     
     col3, col4 = st.columns(2)
     with col3:
-        cat_color = st.color_picker("Cor", value="#3b82f6", key="new_cat_color")
+        cat_color = st.color_picker("Cor", value="#9333ea", key="new_cat_color")
     with col4:
         st.markdown("&nbsp;", unsafe_allow_html=True)
         st.markdown(f"<div style='width:100%; height:40px; background-color:{cat_color}; border-radius:5px;'></div>", 
@@ -67,20 +75,47 @@ with tab_add:
 with tab_list:
     categories = session.query(Category).order_by(Category.category_type, Category.name).all()
     
+    trans_counts = dict(session.query(
+        Transaction.category_id,
+        func.count(Transaction.id)
+    ).group_by(Transaction.category_id).all())
+    
+    cc_trans_counts = dict(session.query(
+        CreditCardTransaction.category_id,
+        func.count(CreditCardTransaction.id)
+    ).group_by(CreditCardTransaction.category_id).all())
+    
+    def get_trans_count(cat):
+        if cat.category_type == CategoryType.CREDIT_CARD:
+            return cc_trans_counts.get(cat.id, 0)
+        return trans_counts.get(cat.id, 0)
+    
+    unused_cats = [c for c in categories if get_trans_count(c) == 0]
+    if unused_cats:
+        st.warning(f"⚠️ {len(unused_cats)} categoria(s) sem transações vinculadas")
+    
     st.markdown("### Categorias de Entrada")
     income_cats = [c for c in categories if c.category_type == CategoryType.INCOME]
     for cat in income_cats:
-        with st.container():
-            col1, col2, col3, col4 = st.columns([1, 4, 2, 1])
+        count = get_trans_count(cat)
+        count_label = ":orange[0 transações]" if count == 0 else f"{count} transações"
+        with st.expander(f"🟢 {cat.name} | {count_label}"):
+            col1, col2 = st.columns(2)
             with col1:
-                st.markdown(f"<div style='width:30px; height:30px; background-color:{cat.color or '#3b82f6'}; border-radius:5px;'></div>", 
-                           unsafe_allow_html=True)
+                edit_name = st.text_input("Nome", value=cat.name, key=f"edit_name_{cat.id}")
             with col2:
-                st.write(cat.name)
-            with col3:
-                st.write(type_labels[cat.category_type])
-            with col4:
-                if st.button("🗑️", key=f"del_cat_{cat.id}"):
+                edit_color = st.color_picker("Cor", value=cat.color or "#3b82f6", key=f"edit_color_{cat.id}")
+            
+            col_btn1, col_btn2 = st.columns(2)
+            with col_btn1:
+                if st.button("💾 Salvar", type="primary", key=f"save_cat_{cat.id}", use_container_width=True):
+                    cat.name = edit_name
+                    cat.color = edit_color
+                    session.commit()
+                    st.session_state.cat_updated = True
+                    st.rerun()
+            with col_btn2:
+                if st.button("🗑️ Excluir", key=f"del_cat_{cat.id}", use_container_width=True):
                     session.delete(cat)
                     session.commit()
                     st.toast("🗑️ Categoria excluída!", icon="🗑️")
@@ -92,17 +127,25 @@ with tab_list:
     st.markdown("### Categorias de Saída")
     expense_cats = [c for c in categories if c.category_type == CategoryType.EXPENSE]
     for cat in expense_cats:
-        with st.container():
-            col1, col2, col3, col4 = st.columns([1, 4, 2, 1])
+        count = get_trans_count(cat)
+        count_label = ":orange[0 transações]" if count == 0 else f"{count} transações"
+        with st.expander(f"🔴 {cat.name} | {count_label}"):
+            col1, col2 = st.columns(2)
             with col1:
-                st.markdown(f"<div style='width:30px; height:30px; background-color:{cat.color or '#ef4444'}; border-radius:5px;'></div>", 
-                           unsafe_allow_html=True)
+                edit_name = st.text_input("Nome", value=cat.name, key=f"edit_name_{cat.id}")
             with col2:
-                st.write(cat.name)
-            with col3:
-                st.write(type_labels[cat.category_type])
-            with col4:
-                if st.button("🗑️", key=f"del_cat_{cat.id}"):
+                edit_color = st.color_picker("Cor", value=cat.color or "#ef4444", key=f"edit_color_{cat.id}")
+            
+            col_btn1, col_btn2 = st.columns(2)
+            with col_btn1:
+                if st.button("💾 Salvar", type="primary", key=f"save_cat_{cat.id}", use_container_width=True):
+                    cat.name = edit_name
+                    cat.color = edit_color
+                    session.commit()
+                    st.session_state.cat_updated = True
+                    st.rerun()
+            with col_btn2:
+                if st.button("🗑️ Excluir", key=f"del_cat_{cat.id}", use_container_width=True):
                     session.delete(cat)
                     session.commit()
                     st.toast("🗑️ Categoria excluída!", icon="🗑️")
@@ -114,46 +157,30 @@ with tab_list:
     st.markdown("### Categorias de Cartão de Crédito")
     cc_cats = [c for c in categories if c.category_type == CategoryType.CREDIT_CARD]
     for cat in cc_cats:
-        with st.container():
-            col1, col2, col3, col4 = st.columns([1, 4, 2, 1])
+        count = get_trans_count(cat)
+        count_label = ":orange[0 transações]" if count == 0 else f"{count} transações"
+        with st.expander(f"💳 {cat.name} | {count_label}"):
+            col1, col2 = st.columns(2)
             with col1:
-                st.markdown(f"<div style='width:30px; height:30px; background-color:{cat.color or '#e94560'}; border-radius:5px;'></div>", 
-                           unsafe_allow_html=True)
+                edit_name = st.text_input("Nome", value=cat.name, key=f"edit_name_{cat.id}")
             with col2:
-                st.write(cat.name)
-            with col3:
-                st.write(type_labels[cat.category_type])
-            with col4:
-                if st.button("🗑️", key=f"del_cat_{cat.id}"):
+                edit_color = st.color_picker("Cor", value=cat.color or "#e94560", key=f"edit_color_{cat.id}")
+            
+            col_btn1, col_btn2 = st.columns(2)
+            with col_btn1:
+                if st.button("💾 Salvar", type="primary", key=f"save_cat_{cat.id}", use_container_width=True):
+                    cat.name = edit_name
+                    cat.color = edit_color
+                    session.commit()
+                    st.session_state.cat_updated = True
+                    st.rerun()
+            with col_btn2:
+                if st.button("🗑️ Excluir", key=f"del_cat_{cat.id}", use_container_width=True):
                     session.delete(cat)
                     session.commit()
                     st.toast("🗑️ Categoria excluída!", icon="🗑️")
                     st.rerun()
     if not cc_cats:
         st.info("Nenhuma categoria de cartão de crédito")
-    
-    st.markdown("---")
-    st.markdown("### Editar Categoria")
-    if categories:
-        cat_to_edit = st.selectbox(
-            "Selecione uma categoria para editar",
-            categories,
-            format_func=lambda c: f"{c.name} ({type_labels[c.category_type]})",
-            key="edit_cat_select"
-        )
-        
-        if cat_to_edit:
-            col1, col2 = st.columns(2)
-            with col1:
-                edit_name = st.text_input("Nome", value=cat_to_edit.name, key="edit_cat_name")
-            with col2:
-                edit_color = st.color_picker("Cor", value=cat_to_edit.color or "#3b82f6", key="edit_cat_color")
-            
-            if st.button("💾 Atualizar Categoria", type="primary", key="btn_update_cat"):
-                cat_to_edit.name = edit_name
-                cat_to_edit.color = edit_color
-                session.commit()
-                st.toast("✅ Categoria atualizada!", icon="✅")
-                st.rerun()
 
 session.close()

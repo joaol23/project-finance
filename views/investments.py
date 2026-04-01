@@ -8,6 +8,7 @@ from database import get_session
 from database.models import Investment, Transaction, Category, InvestmentType, TransactionType
 
 st.title("📈 Investimentos")
+st.caption("Acompanhe sua carteira de investimentos")
 
 session = get_session()
 
@@ -120,16 +121,18 @@ with tab_portfolio:
                 type_values[type_name] = type_values.get(type_name, 0) + value
             
             if type_values and sum(type_values.values()) > 0:
+                purple_palette = ['#9333ea', '#a855f7', '#7c3aed', '#8b5cf6', '#6366f1', '#818cf8']
                 fig = px.pie(
                     values=list(type_values.values()),
                     names=list(type_values.keys()),
                     hole=0.4,
-                    color_discrete_sequence=px.colors.qualitative.Set2
+                    color_discrete_sequence=purple_palette
                 )
                 fig.update_layout(
                     paper_bgcolor='rgba(0,0,0,0)',
                     plot_bgcolor='rgba(0,0,0,0)',
-                    font_color='white'
+                    font_color='#f5f5f5',
+                    legend=dict(font=dict(color='#9ca3af'))
                 )
                 st.plotly_chart(fig, use_container_width=True)
         
@@ -142,16 +145,18 @@ with tab_portfolio:
                     asset_values[inv.ticker] = value
             
             if asset_values:
+                gray_purple_palette = ['#4b5563', '#6b7280', '#9ca3af', '#7c3aed', '#9333ea', '#a855f7']
                 fig = px.pie(
                     values=list(asset_values.values()),
                     names=list(asset_values.keys()),
                     hole=0.4,
-                    color_discrete_sequence=px.colors.qualitative.Pastel
+                    color_discrete_sequence=gray_purple_palette
                 )
                 fig.update_layout(
                     paper_bgcolor='rgba(0,0,0,0)',
                     plot_bgcolor='rgba(0,0,0,0)',
-                    font_color='white'
+                    font_color='#f5f5f5',
+                    legend=dict(font=dict(color='#9ca3af'))
                 )
                 st.plotly_chart(fig, use_container_width=True)
         
@@ -299,6 +304,23 @@ with tab_history:
             linked_transactions = [t for t in linked_transactions if t.investment_id == filter_options[selected_filter]]
     
     if linked_transactions:
+        pagination_sig = (selected_filter if investments else None,)
+        if st.session_state.get("inv_hist_pagination_sig") != pagination_sig:
+            st.session_state.inv_hist_pagination_sig = pagination_sig
+            st.session_state.inv_hist_page = 1
+
+        page_size = st.session_state.get("inv_hist_page_size", 20)
+        total = len(linked_transactions)
+        total_pages = max(1, (total + page_size - 1) // page_size)
+        current_page = int(st.session_state.get("inv_hist_page", 1))
+        current_page = max(1, min(current_page, total_pages))
+        st.session_state.inv_hist_page = current_page
+
+        start_idx = (st.session_state.inv_hist_page - 1) * page_size
+        end_idx = min(start_idx + page_size, total)
+
+        page_linked_transactions = linked_transactions[start_idx:end_idx]
+
         header_cols = st.columns([1.3, 1, 0.8, 0.8, 1.1, 1.2, 1.8, 0.5])
         with header_cols[0]:
             st.markdown("**Data**")
@@ -318,7 +340,7 @@ with tab_history:
             st.markdown("**Ação**")
         st.markdown("---")
         
-        for t in linked_transactions:
+        for t in page_linked_transactions:
             with st.container():
                 qty = float(t.quantity or 0)
                 price_paid = float(t.price_per_unit or 0)
@@ -356,6 +378,33 @@ with tab_history:
                         session.commit()
                         st.toast("🔓 Transação desvinculada!", icon="🔓")
                         st.rerun()
+        
+        col_pag1, col_pag2, col_pag3 = st.columns([2, 2, 2])
+        with col_pag1:
+            new_page = st.number_input(
+                "Página",
+                min_value=1,
+                max_value=total_pages,
+                value=current_page,
+                step=1,
+                key="inv_hist_page_input",
+            )
+            if new_page != current_page:
+                st.session_state.inv_hist_page = int(new_page)
+                st.rerun()
+        with col_pag2:
+            new_page_size = st.selectbox(
+                "Itens por página",
+                [10, 20, 50, 100],
+                index=[10, 20, 50, 100].index(page_size) if page_size in [10, 20, 50, 100] else 1,
+                key="inv_hist_page_size_select",
+            )
+            if new_page_size != page_size:
+                st.session_state.inv_hist_page_size = new_page_size
+                st.session_state.inv_hist_page = 1
+                st.rerun()
+        with col_pag3:
+            st.markdown(f"Mostrando **{start_idx + 1}–{end_idx}** de **{total}**")
     else:
         st.info("Nenhuma transação de investimento registrada")
 
