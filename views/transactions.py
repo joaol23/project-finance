@@ -67,38 +67,57 @@ with tab_add:
     
     if st.button("💾 Salvar Transação", type="primary", use_container_width=True):
         if trans_amount > 0 and trans_description:
-            new_transaction = Transaction(
-                date=trans_date,
-                amount=Decimal(str(trans_amount)),
-                description=trans_description,
-                transaction_type=TransactionType.INCOME if trans_type == "Entrada" else TransactionType.EXPENSE,
-                category_id=category_id,
-                account_id=account.id
-            )
-            session.add(new_transaction)
-            session.commit()
-            st.session_state.trans_saved = True
-            st.rerun()
+            try:
+                # Use service layer for creation (handles rollback/validation)
+                from services.transaction_service import create_transaction
+                new_transaction = create_transaction(
+                    trans_date=trans_date,
+                    amount=Decimal(str(trans_amount)),
+                    description=trans_description,
+                    trans_type=trans_type,
+                    category_name=selected_cat if category_id is not None else None,
+                    account=account,
+                )
+                st.session_state.trans_saved = True
+                st.toast("✅ Transação criada com sucesso!", icon="✅")
+                st.rerun()
+            except Exception as e:
+                st.error(f"Erro ao salvar transação: {e}")
         else:
             st.error("Preencha todos os campos obrigatórios")
 
 with tab_list:
-    col_filter1, col_filter2, col_filter3, col_filter4 = st.columns(4)
+    col_filter0, col_filter1, col_filter2, col_filter3, col_filter4, col_filter5 = st.columns(6)
     
-    with col_filter1:
-        filter_month = st.selectbox("Mês", [None] + list(range(1, 13)), 
-                                    format_func=lambda x: "Todos" if x is None else 
-                                    ["Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho",
-                                     "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"][x-1],
-                                    key="filter_trans_month")
+    # Filtro de mês: opção "Todos" (None) inclui todas as transações
+    with col_filter0:
+        filter_month = st.selectbox(
+            "Mês",
+            [None] + list(range(1, 13)),
+            index=date.today().month,
+            format_func=lambda x: "Todos" if x is None else [
+                "Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho",
+                "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"
+            ][x - 1],
+            key="filter_trans_month"
+        )
     with col_filter2:
         years = [None] + list(range(2020, date.today().year + 2))
+        try:
+            default_year_idx = years.index(date.today().year)
+        except ValueError:
+            default_year_idx = 0
         filter_year = st.selectbox("Ano", years, 
+                                   index=default_year_idx,
                                    format_func=lambda x: "Todos" if x is None else str(x),
                                    key="filter_trans_year")
     with col_filter3:
         filter_type = st.selectbox("Tipo", ["Todos", "Entrada", "Saída"], key="filter_trans_type")
     with col_filter4:
+        all_categories = income_categories + expense_categories
+        cat_filter_options = ["Todas"] + [c.name for c in all_categories]
+        filter_category = st.selectbox("Categoria", cat_filter_options, key="filter_trans_cat")
+    with col_filter5:
         filter_desc = st.text_input("🔍 Filtrar descrição", key="filter_trans_desc",
                                     placeholder="Ex: UBER, IFOOD...")
     
@@ -106,11 +125,11 @@ with tab_list:
     
     query = session.query(Transaction)
     
-    if filter_month:
+    if filter_month and filter_year:
         query = query.filter(
-            Transaction.date >= date(filter_year or date.today().year, filter_month, 1),
-            Transaction.date < date((filter_year or date.today().year) + (1 if filter_month == 12 else 0), 
-                                   (filter_month % 12) + 1, 1)
+            Transaction.date >= date(filter_year, filter_month, 1),
+            Transaction.date < date(filter_year + (1 if filter_month == 12 else 0),
+                                    (filter_month % 12) + 1, 1)
         )
     elif filter_year:
         query = query.filter(
@@ -125,6 +144,10 @@ with tab_list:
     
     if filter_no_category:
         query = query.filter(Transaction.category_id == None)
+    elif filter_category != "Todas":
+        selected_cat = next((c for c in all_categories if c.name == filter_category), None)
+        if selected_cat:
+            query = query.filter(Transaction.category_id == selected_cat.id)
     
     transactions = query.order_by(Transaction.date.desc()).all()
     

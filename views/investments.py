@@ -4,7 +4,9 @@ import plotly.express as px
 import plotly.graph_objects as go
 import re
 from datetime import date
+from datetime import datetime
 from decimal import Decimal
+
 from database import get_session
 from database.models import Investment, Transaction, Category, InvestmentType, TransactionType, Account, CategoryType
 
@@ -56,30 +58,38 @@ if st.session_state.inv_sold:
     st.toast("✅ Venda registrada com sucesso!", icon="✅")
     st.session_state.inv_sold = False
 
-tab_portfolio, tab_sell, tab_pending, tab_history = st.tabs([
-    "📊 Portfólio", "💰 Vender Ativo", "⏳ Transações Pendentes", "📋 Histórico"
+tab_portfolio, tab_new, tab_sell, tab_pending, tab_history = st.tabs([
+    "📊 Portfólio", "➕ Nova Transação", "💰 Vender Ativo", "⏳ Transações Pendentes", "📋 Histórico"
 ])
 
 with tab_portfolio:
+    # existing portfolio code remains unchanged
     st.markdown("### Visão Geral do Portfólio")
     
-    total_invested = sum(float(inv.total_invested) for inv in investments)
-    total_current = sum(float(inv.current_value) for inv in investments)
+    open_investments = [inv for inv in investments if float(inv.total_quantity) > 0]
+    closed_investments = [inv for inv in investments if float(inv.total_quantity) == 0 and len(inv.transactions) > 0]
+    
+    total_invested = sum(float(inv.total_invested) for inv in open_investments)
+    total_current = sum(float(inv.current_value) for inv in open_investments)
     total_gain = total_current - total_invested
     gain_percent = (total_gain / total_invested * 100) if total_invested > 0 else 0
+    total_realized = sum(float(inv.realized_profit) for inv in investments)
     
     col1, col2, col3, col4 = st.columns(4)
     with col1:
-        st.metric("Total Investido", f"R$ {total_invested:,.2f}")
+        st.metric("Total Investido (Aberto)", f"R$ {total_invested:,.2f}")
     with col2:
         st.metric("Valor Atual", f"R$ {total_current:,.2f}")
     with col3:
         delta_color = "normal" if total_gain >= 0 else "inverse"
-        st.metric("Ganho/Perda", f"R$ {total_gain:,.2f}", 
+        st.metric("Ganho Não Realizado", f"R$ {total_gain:,.2f}", 
                  delta=f"{gain_percent:.1f}%" if total_invested > 0 else None,
                  delta_color=delta_color)
     with col4:
-        st.metric("Ativos", len(investments))
+        realized_color = "normal" if total_realized >= 0 else "inverse"
+        st.metric("Lucro Realizado (Vendas)", f"R$ {total_realized:,.2f}", 
+                 delta=f"{len(closed_investments)} encerramento(s)" if closed_investments else "vendas",
+                 delta_color=realized_color)
     
     st.markdown("---")
     
@@ -352,50 +362,173 @@ with tab_portfolio:
             st.info("Registre transações de investimento para ver a evolução do portfólio.")
         
         st.markdown("---")
-        st.markdown("### Meus Investimentos")
+        st.markdown("### Posições Abertas")
         
-        for inv in investments:
-            gain = float(inv.gain_loss)
-            gain_pct = float(inv.gain_loss_percent)
-            gain_color = "🟢" if gain >= 0 else "🔴"
-            
-            with st.expander(f"{gain_color} {inv.ticker} - {inv.name or type_labels[inv.investment_type]}"):
-                col1, col2, col3, col4 = st.columns(4)
-                with col1:
-                    st.metric("Quantidade", f"{float(inv.total_quantity):,.2f}")
-                with col2:
-                    st.metric("Preço Médio", f"R$ {float(inv.average_price):,.2f}")
-                with col3:
-                    st.metric("Total Investido", f"R$ {float(inv.total_invested):,.2f}")
-                with col4:
-                    st.metric("Cotação Atual", f"R$ {float(inv.current_price or 0):,.2f}")
+        if open_investments:
+            for inv in open_investments:
+                gain = float(inv.gain_loss)
+                gain_pct = float(inv.gain_loss_percent)
+                gain_color = "🟢" if gain >= 0 else "🔴"
                 
-                col5, col6, col7, col8 = st.columns(4)
-                with col5:
-                    st.metric("Valor Atual", f"R$ {float(inv.current_value):,.2f}")
-                with col6:
-                    delta_str = f"{gain_pct:+.1f}%"
-                    st.metric("Ganho/Perda", f"R$ {gain:,.2f}", delta=delta_str)
-                with col7:
-                    new_price = st.number_input(
-                        "Atualizar Cotação",
-                        min_value=0.0,
-                        step=0.01,
-                        format="%.2f",
-                        value=float(inv.current_price) if inv.current_price else 0.0,
-                        key=f"inv_price_{inv.id}"
-                    )
-                with col8:
-                    st.markdown("&nbsp;", unsafe_allow_html=True)
-                    if st.button("💾 Salvar", key=f"save_price_{inv.id}"):
-                        inv.current_price = Decimal(str(new_price))
-                        session.commit()
-                        st.toast("✅ Cotação atualizada!", icon="✅")
-                        st.rerun()
+                with st.expander(f"{gain_color} {inv.ticker} - {inv.name or type_labels[inv.investment_type]}"):
+                    col1, col2, col3, col4 = st.columns(4)
+                    with col1:
+                        st.metric("Quantidade", f"{float(inv.total_quantity):,.2f}")
+                    with col2:
+                        st.metric("Preço Médio", f"R$ {float(inv.average_price):,.2f}")
+                    with col3:
+                        st.metric("Total Investido", f"R$ {float(inv.total_invested):,.2f}")
+                    with col4:
+                        st.metric("Cotação Atual", f"R$ {float(inv.current_price or 0):,.2f}")
+                    
+                    col5, col6, col7, col8 = st.columns(4)
+                    with col5:
+                        st.metric("Valor Atual", f"R$ {float(inv.current_value):,.2f}")
+                    with col6:
+                        delta_str = f"{gain_pct:+.1f}%"
+                        st.metric("Ganho/Perda", f"R$ {gain:,.2f}", delta=delta_str)
+                    with col7:
+                        new_price = st.number_input(
+                            "Atualizar Cotação",
+                            min_value=0.0,
+                            step=0.01,
+                            format="%.2f",
+                            value=float(inv.current_price) if inv.current_price else 0.0,
+                            key=f"inv_price_{inv.id}"
+                        )
+                        if st.button("💾 Salvar", key=f"save_price_{inv.id}"):
+                            inv.current_price = Decimal(str(new_price))
+                            session.commit()
+                            st.toast("✅ Cotação atualizada!", icon="✅")
+                            st.rerun()
+        else:
+            st.info("Nenhuma posição em aberto atualmente.")
+            
+        if closed_investments:
+            st.markdown("---")
+            st.markdown("### 🏁 Posições Encerradas")
+            for inv in closed_investments:
+                realized = float(inv.realized_profit)
+                realized_color = "🟢" if realized >= 0 else "🔴"
+                last_pm = float(inv.metrics.get('last_pm', 0))
+                
+                with st.expander(f"{realized_color} {inv.ticker} - Posição Encerrada (Lucro Realizado: R$ {realized:+,.2f})"):
+                    col1, col2, col3, col4 = st.columns(4)
+                    with col1:
+                        st.metric("Quantidade Aberta", "0.00")
+                    with col2:
+                        st.metric("Último PM", f"R$ {last_pm:,.2f}")
+                    with col3:
+                        delta_str = "Lucro Vendas" if realized >= 0 else "Prejuízo Vendas"
+                        st.metric("Lucro Realizado Total", f"R$ {realized:,.2f}", delta=delta_str)
+                    with col4:
+                        st.metric("Status", "Encerrado")
     else:
         st.info("Nenhum investimento cadastrado. Vincule transações na aba 'Transações Pendentes'.")
 
+with tab_new:
+    st.markdown("### Inserir Transações")
+    mode = st.radio("Modo de Inserção", ["Bulk", "Manual"])
+    if mode == "Bulk":
+        st.markdown("#### Inserir Transações em Massa")
+        bulk_input = st.text_area("Cole as transações (separadas por linhas em branco)", height=300, key="bulk_input")
+        if st.button("Processar Transações", key="process_bulk"):
+            if bulk_input.strip():
+                groups = [g.strip() for g in re.split(r"\n\s*\n", bulk_input.strip()) if g.strip()]
+                success = 0
+                failures = []
+                account = session.query(Account).first()
+                if not account:
+                    account = Account(name="Conta Principal", initial_balance=Decimal("0"))
+                    session.add(account)
+                    session.commit()
+                cat = session.query(Category).filter(Category.name == "Ações").first()
+                for idx, group in enumerate(groups, start=1):
+                    try:
+                        lines = [ln.strip() for ln in group.splitlines() if ln.strip()]
+                        if len(lines) != 9:
+                            raise ValueError(f"Grupo {idx} tem {len(lines)} linhas, esperado 9")
+                        ticker, inv_type_str, order_type, qty_str, price_str, total_str, total_qty_str, date_str, source = lines
+                        qty = Decimal(qty_str.replace(',', '.'))
+                        price = Decimal(price_str.replace('R$', '').replace(',', '.').strip())
+                        total = Decimal(total_str.replace('R$', '').replace(',', '.').strip())
+                        trans_date = datetime.strptime(date_str, "%d/%m/%Y").date()
+                        investment = session.query(Investment).filter(Investment.ticker == ticker).first()
+                        if not investment:
+                            inv_type_map = {"Ações": InvestmentType.STOCK, "FIIs": InvestmentType.FII, "Criptomoedas": InvestmentType.CRYPTO}
+                            investment = Investment(ticker=ticker, investment_type=inv_type_map.get(inv_type_str, InvestmentType.OTHER))
+                            session.add(investment)
+                            session.flush()
+                        tx = Transaction(
+                            date=trans_date,
+                            amount=total,
+                            description=f"{order_type} de {qty} {ticker}",
+                            transaction_type=TransactionType.EXPENSE if order_type.lower() == "compra" else TransactionType.INCOME,
+                            account_id=account.id,
+                            investment_id=investment.id,
+                            quantity=qty,
+                            price_per_unit=price,
+                            category_id=cat.id if cat else None,
+                        )
+                        session.add(tx)
+                        session.commit()
+                        success += 1
+                    except Exception as e:
+                        session.rollback()
+                        failures.append(f"Grupo {idx}: {str(e)}")
+                if success:
+                    st.success(f"✅ {success} transação(ões) processada(s) com sucesso.")
+                if failures:
+                    st.error("Erros ao processar alguns grupos:")
+                    for f in failures:
+                        st.caption(f)
+    else:
+        st.markdown("#### Inserir Transação Individual")
+        with st.form(key="manual_form"):
+            ticker = st.text_input("Ticker")
+            inv_type_str = st.selectbox("Tipo de Investimento", ["Ações", "FIIs", "Criptomoedas", "Outro"])
+            order_type = st.selectbox("Tipo de Ordem", ["Compra", "Venda"])
+            qty = st.number_input("Quantidade", min_value=0.0, step=0.01, format="%.2f")
+            price = st.number_input("Preço Unitário (R$)", min_value=0.0, step=0.01, format="%.2f")
+            date_val = st.date_input("Data do Lançamento", value=date.today())
+            source = st.text_input("Fonte")
+            submitted = st.form_submit_button("Adicionar Transação")
+            if submitted:
+                try:
+                    total = Decimal(str(qty)) * Decimal(str(price))
+                    trans_date = date_val
+                    account = session.query(Account).first()
+                    if not account:
+                        account = Account(name="Conta Principal", initial_balance=Decimal("0"))
+                        session.add(account)
+                        session.commit()
+                    cat = session.query(Category).filter(Category.name == "Ações").first()
+                    investment = session.query(Investment).filter(Investment.ticker == ticker).first()
+                    if not investment:
+                        inv_type_map = {"Ações": InvestmentType.STOCK, "FIIs": InvestmentType.FII, "Criptomoedas": InvestmentType.CRYPTO}
+                        investment = Investment(ticker=ticker, investment_type=inv_type_map.get(inv_type_str, InvestmentType.OTHER))
+                        session.add(investment)
+                        session.flush()
+                    tx = Transaction(
+                        date=trans_date,
+                        amount=total,
+                        description=f"{order_type} de {qty} {ticker}",
+                        transaction_type=TransactionType.EXPENSE if order_type.lower() == "compra" else TransactionType.INCOME,
+                        account_id=account.id,
+                        investment_id=investment.id,
+                        quantity=Decimal(str(qty)),
+                        price_per_unit=Decimal(str(price)),
+                        category_id=cat.id if cat else None,
+                    )
+                    session.add(tx)
+                    session.commit()
+                    st.success("✅ Transação adicionada com sucesso.")
+                except Exception as e:
+                    session.rollback()
+                    st.error(f"❌ Erro ao adicionar transação: {str(e)}")
+
 with tab_sell:
+    # existing sell code remains unchanged
     st.markdown("### Registrar Venda de Ativo")
     st.markdown("Registre a venda total ou parcial de um investimento.")
     
@@ -539,6 +672,7 @@ with tab_sell:
         st.markdown("Vincule transações de compra na aba **Transações Pendentes** para começar.")
 
 with tab_pending:
+    # existing pending code remains unchanged
     st.markdown("### Transações Pendentes de Vinculação")
     st.markdown("Transações com categorias de investimento que ainda não foram vinculadas a um ativo.")
     
@@ -624,6 +758,7 @@ with tab_pending:
         st.markdown("Crie transações com as categorias **Ações**, **FIIs** ou **Criptomoedas** para vê-las aqui.")
 
 with tab_history:
+    # existing history code remains unchanged
     st.markdown("### Histórico de Transações de Investimento")
     
     linked_transactions = session.query(Transaction).filter(
@@ -636,15 +771,7 @@ with tab_history:
     total_bought = sum(float(t.amount) for t in buy_transactions)
     total_sold = sum(float(t.amount) for t in sell_transactions)
     
-    total_realized_profit = Decimal(0)
-    for t in sell_transactions:
-        if t.investment and t.quantity:
-            avg_price = t.investment.average_price
-            sale_price = t.price_per_unit or Decimal(0)
-            qty = t.quantity
-            cost_basis = qty * avg_price
-            sale_value = qty * sale_price
-            total_realized_profit += (sale_value - cost_basis)
+    total_realized_profit = sum(inv.realized_profit for inv in investments)
     
     col_sum1, col_sum2, col_sum3, col_sum4 = st.columns(4)
     with col_sum1:
@@ -750,10 +877,9 @@ with tab_history:
                 with col7:
                     if is_sale:
                         if t.investment:
-                            avg_price = float(t.investment.average_price)
-                            cost_basis = qty * avg_price
-                            realized_profit = total_value - cost_basis
-                            profit_pct = (realized_profit / cost_basis * 100) if cost_basis > 0 else 0
+                            tx_detail = t.investment.metrics['transaction_details'].get(t.id, {})
+                            realized_profit = float(tx_detail.get('realized_profit', 0))
+                            profit_pct = float(tx_detail.get('profit_pct', 0))
                             color = "green" if realized_profit >= 0 else "red"
                             st.markdown(f":{color}[**Lucro: R$ {realized_profit:+,.2f}** ({profit_pct:+.1f}%)]")
                         else:

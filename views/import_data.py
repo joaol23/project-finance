@@ -72,6 +72,36 @@ def _is_payment_entry(desc: str) -> bool:
             return True
     return False
 
+KEYWORD_CATEGORY_MAP = [
+    (r"\b(uber|99\*|99 ride|99food|99 - nupay|cabify|indrive)\b", "Uber"),
+    (r"\b(spotify|netflix|amazonprime|prime video|disney|hbomax|max|apple\.com|youtube|tinder|uber one|seguro superprotegido)\b", "Assinaturas"),
+    (r"\b(totalpass|smart fit|bluefit|bio ritmo|academia|bodytech|gympass)\b", "Academia"),
+    (r"\b(drogaria|drogarias|farmacia|farma|raia|drogasil|araujo|pacheco|pague menos|saudemob|medico|consultorio|exame|laboratorio)\b", "Saúde"),
+    (r"\b(fumec|puc|estacio|pucminas|unibh|faculdade|universidade|coursera|udemy)\b", "Educação"),
+    (r"\b(cinema|cinemark|cinepolis|kinoplex|boutevard|ingresso|sympla|eventim|ticketmaster|pipoca)\b", "Entretenimento"),
+    (r"\b(bar\b|cerveja|chopp|pub\b|tap house|sapucai|zig\*lab|overdose|balada|boate|festa)\b", "Festas/rolês"),
+    (r"\b(airbnb|booking|hoteis|decolar|voegol|latam|azul linhas|passagem aerea|flixbus|gontijo)\b", "Viagens/Lazer"),
+    (r"\b(restaurante|restau|supermercado|mercado|carrefour|pao de acucar|epa|supernosso|faria|king brasa|mi garba|tokai|padaria|panificadora|empada|lanche|hamburguer|pizza|mcdonalds|bk|burger king|ifood)\b", "Restaurantes/Bares/Mercado"),
+    (r"\b(amazon|renner|zara|riachuelo|c&a|shein|shopee|ali express|mercado pago|magalu|magazine luiza|kabum|casas bahia)\b", "Compras pessoais"),
+    (r"\b(presente|presentes|bijute|floricultura)\b", "Presentes"),
+]
+
+def suggest_cc_category(desc: str, session) -> str:
+    if not desc:
+        return "Sem Categoria"
+    d_lower = desc.strip().lower()
+    for pattern, cat_name in KEYWORD_CATEGORY_MAP:
+        if re.search(pattern, d_lower):
+            return cat_name
+            
+    match_hist = session.query(CreditCardTransaction).filter(
+        CreditCardTransaction.description.ilike(f"%{d_lower}%")
+    ).first()
+    if match_hist and match_hist.category and match_hist.category.name and not match_hist.category.name.startswith("Outros"):
+        return match_hist.category.name
+        
+    return "Sem Categoria"
+
 def _adjust_date_to_ref_month(original_date, ref_month: int, ref_year: int):
     """
     Ajusta datas que estão fora do mês de referência para o mês correto da fatura.
@@ -99,7 +129,11 @@ def _parse_nubank_csv(file_bytes: bytes, ref_month: int | None = None, ref_year:
     - Mantém estornos (valores negativos são convertidos para positivos com prefixo)
     - Ajusta datas de parcelas para o mês de referência da fatura
     """
-    text = file_bytes.decode("utf-8", errors="replace")
+    try:
+        text = file_bytes.decode("utf-8-sig")
+    except Exception:
+        text = file_bytes.decode("latin1", errors="replace")
+        
     df = pd.read_csv(io.StringIO(text))
     
     df.columns = [c.strip().lower() for c in df.columns]
@@ -111,9 +145,27 @@ def _parse_nubank_csv(file_bytes: bytes, ref_month: int | None = None, ref_year:
     }, inplace=True)
     
     df["Data"] = pd.to_datetime(df["Data"], errors="coerce").dt.date
-    df["Valor"] = pd.to_numeric(df["Valor"], errors="coerce")
     
-    df = df[~df["Descricao"].apply(_is_payment_entry)].copy()
+    def _parse_amount(val):
+        if pd.isna(val):
+            return None
+        s = str(val).strip()
+        if not s or s.lower() == "nan":
+            return None
+        if "," in s:
+            s = s.replace(".", "").replace(",", ".")
+        try:
+            return float(s)
+        except Exception:
+            return None
+
+    if "Valor" in df.columns:
+        df["Valor"] = df["Valor"].apply(_parse_amount)
+    
+    if "Descricao" in df.columns:
+        df = df[df["Descricao"].notna()].copy()
+        df = df[~df["Descricao"].apply(_is_payment_entry)].copy()
+    
     df = df[df["Data"].notna()].copy()
     df = df[df["Valor"].notna()].copy()
     
@@ -125,9 +177,10 @@ def _parse_nubank_csv(file_bytes: bytes, ref_month: int | None = None, ref_year:
             valor = abs(valor)
         return pd.Series({"Descricao": desc, "Valor": valor})
     
-    processed = df.apply(process_row, axis=1)
-    df["Descricao"] = processed["Descricao"]
-    df["Valor"] = processed["Valor"]
+    if len(df) > 0:
+        processed = df.apply(process_row, axis=1)
+        df["Descricao"] = processed["Descricao"]
+        df["Valor"] = processed["Valor"]
     
     if adjust_dates and ref_month and ref_year:
         df["Data"] = df["Data"].apply(lambda d: _adjust_date_to_ref_month(d, ref_month, ref_year))
@@ -153,8 +206,8 @@ def _parse_bradesco_cc_pdf(file_bytes: bytes, ref_month: int, ref_year: int, adj
     else:
         text = file_bytes.decode("utf-8", errors="replace")
     
-    pattern_date_start = r"^(\d{2}/\d{2})\s+(.+)"
-    pattern_value_end = r"(-?[\d.]+,\d{2})$"
+    pattern_date_start = r"^(\d{2}/\d{2})\s*(.+)"
+    pattern_value_end = r"(-?\s*[\d.]+,\d{2}\s*-?)$"
     
     skip_patterns = [
         r"^XXXX\.",
@@ -172,6 +225,11 @@ def _parse_bradesco_cc_pdf(file_bytes: bytes, ref_month: int, ref_year: int, adj
         r"VISA SIGNATURE$",
         r"VISA GOLD$",
         r"MASTERCARD$",
+        r"^Total da fatura",
+        r"^Total para",
+        r"^Total parcelados",
+        r"^Previsão",
+        r"^\d{2}/\d{2}/\d{4}",
     ]
     
     rows = []
@@ -187,7 +245,7 @@ def _parse_bradesco_cc_pdf(file_bytes: bytes, ref_month: int, ref_year: int, adj
         
         should_skip = False
         for pattern in skip_patterns:
-            if re.search(pattern, line):
+            if re.search(pattern, line, re.IGNORECASE):
                 should_skip = True
                 break
         if should_skip:
@@ -205,15 +263,33 @@ def _parse_bradesco_cc_pdf(file_bytes: bytes, ref_month: int, ref_year: int, adj
         if not match_value:
             if i < len(lines):
                 next_line = lines[i].strip()
-                if not re.match(r"^\d{2}/\d{2}", next_line) and not any(re.search(p, next_line) for p in skip_patterns):
-                    rest = rest + " " + next_line
+                if not re.match(r"^\d{2}/\d{2}", next_line) and not any(re.search(p, next_line, re.IGNORECASE) for p in skip_patterns):
+                    m_frac = None
+                    for den_len in (1, 2):
+                        for num_len in (1, 2):
+                            pat = rf"^(\d{{{num_len}}}/\d{{{den_len}}})(-?\s*[\d.]+,\d{{2}}\s*-?)$"
+                            m_tmp = re.match(pat, next_line)
+                            if m_tmp:
+                                n_num, n_den = map(int, m_tmp.group(1).split("/"))
+                                if n_num <= n_den and n_den <= 60:
+                                    m_frac = m_tmp
+                                    break
+                        if m_frac:
+                            break
+                    if not m_frac:
+                        m_frac = re.match(r"^(\d+/\d+)\s*(-?\s*[\d.]+,\d{2}\s*-?)$", next_line)
+
+                    if m_frac:
+                        rest = rest + " " + m_frac.group(1) + " " + m_frac.group(2)
+                    else:
+                        rest = rest + " " + next_line
                     i += 1
                     match_value = re.search(pattern_value_end, rest)
         
         if not match_value:
             continue
         
-        valor_str = match_value.group(1)
+        raw_val_str = match_value.group(1).strip()
         desc = rest[:match_value.start()].strip()
         
         if not desc:
@@ -222,15 +298,21 @@ def _parse_bradesco_cc_pdf(file_bytes: bytes, ref_month: int, ref_year: int, adj
         if _is_payment_entry(desc):
             continue
         
-        valor_str = valor_str.replace(".", "").replace(",", ".")
+        is_negative = False
+        if raw_val_str.startswith("-") or raw_val_str.endswith("-"):
+            is_negative = True
+            raw_val_str = raw_val_str.replace("-", "").strip()
+        
+        valor_str = raw_val_str.replace(".", "").replace(",", ".")
         try:
             valor = float(valor_str)
         except Exception:
             continue
         
-        if valor < 0:
-            desc = f"ESTORNO: {desc}"
-            valor = abs(valor)
+        if is_negative:
+            valor = -valor
+            if not desc.startswith("ESTORNO:"):
+                desc = f"ESTORNO: {desc}"
         
         try:
             day, month = map(int, date_str.split("/"))
@@ -428,16 +510,25 @@ with tab_excel:
                 st.markdown("#### Transações")
                 st.dataframe(df_trans.head(10))
 
+                if 'Valor' in df_trans.columns:
+                    total_trans = pd.to_numeric(df_trans['Valor'], errors='coerce').sum()
+                    st.metric("Total das Transações", f"R$ {total_trans:,.2f}".replace(',', 'X').replace('.', ',').replace('X', '.'))
+
                 if 'Quantidade' in df_trans.columns:
                     inv_rows = df_trans[(df_trans['Quantidade'].notna()) & (df_trans['Quantidade'] != '') & (df_trans['Quantidade'] != 0)]
                     if len(inv_rows) > 0:
                         st.info(f"📈 {len(inv_rows)} transações de investimento detectadas (com Quantidade). O ticker será extraído da descrição.")
 
-            selected_import_card = None
             if import_cc:
                 df_cc = pd.read_excel(uploaded_excel, sheet_name='Cartao')
+                if 'Categoria' not in df_cc.columns or df_cc['Categoria'].isna().all():
+                    df_cc['Categoria Sugerida'] = df_cc['Descricao'].apply(lambda d: suggest_cc_category(d, session))
                 st.markdown("#### Cartão de Crédito")
                 st.dataframe(df_cc.head(10))
+
+                if 'Valor' in df_cc.columns:
+                    total_cc = pd.to_numeric(df_cc['Valor'], errors='coerce').sum()
+                    st.metric("Total Cartão de Crédito", f"R$ {total_cc:,.2f}".replace(',', 'X').replace('.', ',').replace('X', '.'))
 
                 cards = session.query(CreditCard).all()
                 if cards:
@@ -587,19 +678,21 @@ with tab_excel:
                             date_val = pd.to_datetime(row['Data'], dayfirst=True).date()
                             amount = Decimal(str(row['Valor']))
                             description = str(row['Descricao'])
-                            cat_name = str(row.get('Categoria', '')).lower()
+                            cat_name = str(row.get('Categoria Sugerida', row.get('Categoria', ''))).strip()
                             parcela = str(row.get('Parcela', '1/1'))
-                            
                             parts = parcela.split('/')
                             installment_number = int(parts[0]) if len(parts) >= 1 else 1
                             total_installments = int(parts[1]) if len(parts) >= 2 else 1
-                            
-                            category = categories.get(cat_name)
-                            if not category and cat_name:
-                                category = Category(name=row['Categoria'], category_type=CategoryType.CREDIT_CARD, color="#e94560")
-                                session.add(category)
-                                session.flush()
-                                categories[cat_name] = category
+
+                            if cat_name.lower() in ['', 'nan', 'none', 'sem categoria']:
+                                category = None
+                            else:
+                                category = categories.get(cat_name.lower())
+                                if not category and cat_name:
+                                    category = Category(name=cat_name, category_type=CategoryType.CREDIT_CARD, color="#e94560")
+                                    session.add(category)
+                                    session.flush()
+                                    categories[cat_name.lower()] = category
                             
                             cc_trans = CreditCardTransaction(
                                 date=date_val,
@@ -638,6 +731,14 @@ with tab_bradesco:
             df_bradesco = _read_bradesco_csv(uploaded_bradesco.getvalue())
             st.markdown("#### Transações (Bradesco)")
             st.dataframe(df_bradesco.head(30))
+
+            credit_sum = pd.to_numeric(df_bradesco['Credito'], errors='coerce').sum() if 'Credito' in df_bradesco.columns else 0
+            debit_sum = pd.to_numeric(df_bradesco['Debito'], errors='coerce').sum() if 'Debito' in df_bradesco.columns else 0
+            col_b1, col_b2 = st.columns(2)
+            with col_b1:
+                st.metric("Total Créditos (Entradas)", f"R$ {credit_sum:,.2f}".replace(',', 'X').replace('.', ',').replace('X', '.'))
+            with col_b2:
+                st.metric("Total Débitos (Saídas)", f"R$ {debit_sum:,.2f}".replace(',', 'X').replace('.', ',').replace('X', '.'))
 
             st.markdown("---")
             if st.button("🏦 Importar CSV Bradesco", type="primary", use_container_width=True, key="btn_import_bradesco"):
@@ -730,8 +831,12 @@ with tab_nubank_cc:
                 nubank_ref_year,
                 nubank_adjust_dates
             )
+            df_nubank["Categoria Sugerida"] = df_nubank["Descricao"].apply(lambda d: suggest_cc_category(d, session))
             st.markdown(f"**{len(df_nubank)} transações encontradas**")
             st.dataframe(df_nubank.head(30))
+            if 'Valor' in df_nubank.columns:
+                total_nubank = pd.to_numeric(df_nubank['Valor'], errors='coerce').sum()
+                st.metric("Valor Total das Transações", f"R$ {total_nubank:,.2f}".replace(',', 'X').replace('.', ',').replace('X', '.'))
             
             cards = session.query(CreditCard).all()
             if cards:
@@ -756,16 +861,27 @@ with tab_nubank_cc:
                         session.add(target_card)
                         session.flush()
                 
+                categories_map = {c.name.lower(): c for c in session.query(Category).all()}
                 imported = 0
                 for _, row in df_nubank.iterrows():
                     try:
+                        cat_name = row.get("Categoria Sugerida")
+                        category = None
+                        if cat_name and cat_name != "Sem Categoria":
+                            category = categories_map.get(cat_name.lower())
+                            if not category:
+                                category = Category(name=cat_name, category_type=CategoryType.CREDIT_CARD, color="#e94560")
+                                session.add(category)
+                                session.flush()
+                                categories_map[cat_name.lower()] = category
+                        
                         cc_trans = CreditCardTransaction(
                             date=row["Data"],
                             amount=Decimal(str(row["Valor"])),
                             description=str(row["Descricao"]),
                             installment_number=1,
                             total_installments=1,
-                            category_id=None,
+                            category_id=category.id if category else None,
                             credit_card_id=target_card.id
                         )
                         session.add(cc_trans)
@@ -828,8 +944,12 @@ with tab_bradesco_cc:
                 bradesco_cc_ref_year,
                 bradesco_cc_adjust_dates
             )
+            df_bradesco_cc["Categoria Sugerida"] = df_bradesco_cc["Descricao"].apply(lambda d: suggest_cc_category(d, session))
             st.markdown(f"**{len(df_bradesco_cc)} transações encontradas**")
             st.dataframe(df_bradesco_cc.head(30))
+            if 'Valor' in df_bradesco_cc.columns:
+                total_bcc = pd.to_numeric(df_bradesco_cc['Valor'], errors='coerce').sum()
+                st.metric("Valor Total das Transações", f"R$ {total_bcc:,.2f}".replace(',', 'X').replace('.', ',').replace('X', '.'))
             
             cards = session.query(CreditCard).all()
             if cards:
@@ -854,16 +974,27 @@ with tab_bradesco_cc:
                         session.add(target_card)
                         session.flush()
                 
+                categories_map = {c.name.lower(): c for c in session.query(Category).all()}
                 imported = 0
                 for _, row in df_bradesco_cc.iterrows():
                     try:
+                        cat_name = row.get("Categoria Sugerida")
+                        category = None
+                        if cat_name and cat_name != "Sem Categoria":
+                            category = categories_map.get(cat_name.lower())
+                            if not category:
+                                category = Category(name=cat_name, category_type=CategoryType.CREDIT_CARD, color="#e94560")
+                                session.add(category)
+                                session.flush()
+                                categories_map[cat_name.lower()] = category
+                        
                         cc_trans = CreditCardTransaction(
                             date=row["Data"],
                             amount=Decimal(str(row["Valor"])),
                             description=str(row["Descricao"]),
                             installment_number=1,
                             total_installments=1,
-                            category_id=None,
+                            category_id=category.id if category else None,
                             credit_card_id=target_card.id
                         )
                         session.add(cc_trans)

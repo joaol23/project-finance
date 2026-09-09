@@ -1,7 +1,7 @@
 from datetime import date
 from decimal import Decimal
 from typing import Optional, List
-from sqlalchemy import String, Integer, Date, Numeric, ForeignKey, Text, Enum as SQLEnum, create_engine, UniqueConstraint
+from sqlalchemy import String, Integer, Date, Numeric, ForeignKey, Text, Enum as SQLEnum, create_engine, UniqueConstraint, Index
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 import enum
 
@@ -85,6 +85,12 @@ class Transaction(Base):
     account: Mapped["Account"] = relationship(back_populates="transactions")
     investment: Mapped[Optional["Investment"]] = relationship(back_populates="transactions")
 
+    __table_args__ = (
+        Index('ix_transactions_date', date),
+        Index('ix_transactions_category_id', category_id),
+        Index('ix_transactions_account_id', account_id),
+    )
+
 
 class Budget(Base):
     __tablename__ = "budgets"
@@ -134,31 +140,25 @@ class Investment(Base):
     transactions: Mapped[List["Transaction"]] = relationship(back_populates="investment")
 
     @property
+    def metrics(self) -> dict:
+        from services.investment_service import calculate_investment_metrics
+        return calculate_investment_metrics(self.transactions)
+
+    @property
     def total_quantity(self) -> Decimal:
-        total = Decimal(0)
-        for t in self.transactions:
-            if t.quantity:
-                if t.transaction_type == TransactionType.EXPENSE:
-                    total += t.quantity
-                elif t.transaction_type == TransactionType.INCOME:
-                    total -= t.quantity
-        return total
+        return self.metrics['open_quantity']
 
     @property
     def total_invested(self) -> Decimal:
-        total = Decimal(0)
-        for t in self.transactions:
-            if t.transaction_type == TransactionType.EXPENSE:
-                total += t.amount
-            elif t.transaction_type == TransactionType.INCOME:
-                total -= t.amount
-        return total
+        return self.metrics['open_cost']
 
     @property
     def average_price(self) -> Decimal:
-        if self.total_quantity > 0:
-            return self.total_invested / self.total_quantity
-        return Decimal(0)
+        return self.metrics['average_price']
+
+    @property
+    def realized_profit(self) -> Decimal:
+        return self.metrics['total_realized_profit']
 
     @property
     def current_value(self) -> Decimal:
@@ -175,3 +175,4 @@ class Investment(Base):
         if self.total_invested > 0:
             return (self.gain_loss / self.total_invested) * 100
         return Decimal(0)
+

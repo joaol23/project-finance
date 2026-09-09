@@ -3,8 +3,32 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, Session
 from .models import Base, Category, CategoryType, Account
 
-DATABASE_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data", "financas.db")
+def _resolve_database_path() -> str:
+    env_path = os.getenv("FINANCAS_DB_PATH") or os.getenv("DATABASE_PATH")
+    if env_path:
+        return env_path
+    
+    user_home = os.path.expanduser("~")
+    possible_gdrive_paths = [
+        os.path.join(user_home, "OneDrive", "Documentos", "GoogleDrive", "financas.db"),
+        os.path.join(user_home, "OneDrive", "Documents", "GoogleDrive", "financas.db"),
+        os.path.join(user_home, "Documentos", "GoogleDrive", "financas.db"),
+        os.path.join(user_home, "Documents", "GoogleDrive", "financas.db"),
+        os.path.join(user_home, "Google Drive", "financas.db"),
+        os.path.join(user_home, "GoogleDrive", "financas.db"),
+    ]
+    
+    for gpath in possible_gdrive_paths:
+        if os.path.exists(gpath):
+            return gpath
+        gdir = os.path.dirname(gpath)
+        if os.path.exists(gdir):
+            return gpath
 
+    return os.path.join(os.path.dirname(os.path.dirname(__file__)), "data", "financas.db")
+
+
+DATABASE_PATH = _resolve_database_path()
 os.makedirs(os.path.dirname(DATABASE_PATH), exist_ok=True)
 
 engine = create_engine(f"sqlite:///{DATABASE_PATH}", echo=False)

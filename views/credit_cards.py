@@ -148,13 +148,18 @@ with tab_cards:
 with tab_transactions:
     st.markdown("### Transações do Cartão")
     
-    col_filter1, col_filter2, col_filter3, col_filter4 = st.columns(4)
-    with col_filter1:
-        filter_month = st.selectbox("Mês", list(range(1, 13)), 
-                                    index=date.today().month - 1,
-                                    format_func=lambda x: ["Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho",
-                                                           "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"][x-1],
-                                    key="filter_cc_month")
+    col_filter0, col_filter1, col_filter2, col_filter3, col_filter4, col_filter5 = st.columns(6)
+    with col_filter0:
+        filter_month = st.selectbox(
+            "Mês",
+            [None] + list(range(1, 13)),
+            index=date.today().month,
+            format_func=lambda x: "Todos" if x is None else [
+                "Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho",
+                "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"
+            ][x - 1],
+            key="filter_cc_month"
+        )
     with col_filter2:
         years = list(range(2020, date.today().year + 2))
         filter_year = st.selectbox("Ano", years, index=years.index(date.today().year), key="filter_cc_year")
@@ -162,16 +167,27 @@ with tab_transactions:
         card_filter_options = ["Todos"] + [c.name for c in cards]
         filter_card = st.selectbox("Cartão", card_filter_options, key="filter_cc_card")
     with col_filter4:
+        cat_filter_options = ["Todas"] + [c.name for c in cc_categories]
+        filter_category = st.selectbox("Categoria", cat_filter_options, key="filter_cc_cat")
+    with col_filter5:
         filter_desc = st.text_input("🔍 Filtrar descrição", key="filter_cc_desc", 
                                     placeholder="Ex: UBER, IFOOD...")
     
     filter_no_category = st.checkbox("🏷️ Apenas sem categoria", key="filter_cc_no_cat")
     
-    query = session.query(CreditCardTransaction).filter(
-        CreditCardTransaction.date >= date(filter_year, filter_month, 1),
-        CreditCardTransaction.date < date(filter_year + (1 if filter_month == 12 else 0), 
-                                         (filter_month % 12) + 1, 1)
-    )
+    if filter_month and filter_year:
+        query = session.query(CreditCardTransaction).filter(
+            CreditCardTransaction.date >= date(filter_year, filter_month, 1),
+            CreditCardTransaction.date < date(filter_year + (1 if filter_month == 12 else 0), 
+                                             (filter_month % 12) + 1, 1)
+        )
+    elif filter_year:
+        query = session.query(CreditCardTransaction).filter(
+            CreditCardTransaction.date >= date(filter_year, 1, 1),
+            CreditCardTransaction.date < date(filter_year + 1, 1, 1)
+        )
+    else:
+        query = session.query(CreditCardTransaction)
     
     if filter_card != "Todos":
         selected_card = next((c for c in cards if c.name == filter_card), None)
@@ -180,6 +196,10 @@ with tab_transactions:
     
     if filter_no_category:
         query = query.filter(CreditCardTransaction.category_id == None)
+    elif filter_category != "Todas":
+        selected_cat = next((c for c in cc_categories if c.name == filter_category), None)
+        if selected_cat:
+            query = query.filter(CreditCardTransaction.category_id == selected_cat.id)
     
     transactions = query.order_by(CreditCardTransaction.date.desc()).all()
     
