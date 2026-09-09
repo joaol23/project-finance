@@ -10,6 +10,7 @@ def _resolve_database_path() -> str:
     
     user_home = os.path.expanduser("~")
     possible_gdrive_paths = [
+        os.path.join(user_home, "Meu Drive", "banco_financas", "financas.db"),
         os.path.join(user_home, "OneDrive", "Documentos", "GoogleDrive", "financas.db"),
         os.path.join(user_home, "OneDrive", "Documents", "GoogleDrive", "financas.db"),
         os.path.join(user_home, "Documentos", "GoogleDrive", "financas.db"),
