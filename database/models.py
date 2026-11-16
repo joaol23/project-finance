@@ -61,7 +61,7 @@ class Category(Base):
     is_investment: Mapped[bool] = mapped_column(default=False)
 
     transactions: Mapped[List["Transaction"]] = relationship(back_populates="category")
-    budgets: Mapped[List["Budget"]] = relationship(back_populates="category")
+    budgets: Mapped[List["Budget"]] = relationship(back_populates="category", cascade="all, delete-orphan")
     credit_card_transactions: Mapped[List["CreditCardTransaction"]] = relationship(back_populates="category")
 
 

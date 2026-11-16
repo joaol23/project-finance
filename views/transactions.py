@@ -16,6 +16,8 @@ if "trans_updated" not in st.session_state:
     st.session_state.trans_updated = False
 if "trans_deleted" not in st.session_state:
     st.session_state.trans_deleted = False
+if "trans_bulk_deleted_count" not in st.session_state:
+    st.session_state.trans_bulk_deleted_count = 0
 
 if st.session_state.trans_saved:
     st.toast("✅ Transação criada com sucesso!", icon="✅")
@@ -26,6 +28,9 @@ if st.session_state.trans_updated:
 if st.session_state.trans_deleted:
     st.toast("🗑️ Transação excluída!", icon="🗑️")
     st.session_state.trans_deleted = False
+if st.session_state.trans_bulk_deleted_count > 0:
+    st.toast(f"🗑️ {st.session_state.trans_bulk_deleted_count} transações excluídas em lote!", icon="🗑️")
+    st.session_state.trans_bulk_deleted_count = 0
 
 account = session.query(Account).first()
 if not account:
@@ -155,33 +160,7 @@ with tab_list:
         filter_lower = filter_desc.lower()
         transactions = [t for t in transactions if filter_lower in t.description.lower()]
     
-    st.markdown(f"**{len(transactions)} transações encontradas**")
-    
     if transactions:
-        filter_info = f" que contêm **\"{filter_desc}\"**" if filter_desc else " listadas"
-        with st.expander(f"⚡ Alteração em lote ({len(transactions)} transações)"):
-            st.info(f"Alterar categoria de todas as {len(transactions)} transações{filter_info}")
-            
-            all_categories = income_categories + expense_categories
-            col_bulk1, col_bulk2 = st.columns([3, 1])
-            with col_bulk1:
-                bulk_cat_options = ["Sem categoria"] + [c.name for c in all_categories]
-                bulk_new_cat = st.selectbox("Nova categoria", bulk_cat_options, key="bulk_trans_cat")
-            with col_bulk2:
-                st.write("")
-                st.write("")
-                if st.button("✅ Aplicar a todas", key="apply_bulk_trans_cat", use_container_width=True):
-                    if bulk_new_cat == "Sem categoria":
-                        new_cat_id = None
-                    else:
-                        selected_cat = next((c for c in all_categories if c.name == bulk_new_cat), None)
-                        new_cat_id = selected_cat.id if selected_cat else None
-                    
-                    for t in transactions:
-                        t.category_id = new_cat_id
-                    session.commit()
-                    st.toast(f"✅ {len(transactions)} transações atualizadas!", icon="✅")
-                    st.rerun()
         pagination_sig = (filter_month, filter_year, filter_type, filter_desc, filter_no_category)
         if st.session_state.get("trans_pagination_sig") != pagination_sig:
             st.session_state.trans_pagination_sig = pagination_sig
@@ -198,7 +177,92 @@ with tab_list:
         end_idx = min(start_idx + page_size, total)
 
         page_transactions = transactions[start_idx:end_idx]
-        
+
+        selected_ids = [t.id for t in transactions if st.session_state.get(f"select_trans_{t.id}", False)]
+
+        col_sel1, col_sel2, col_sel3, col_sel4, col_sel5 = st.columns([3, 1.2, 1.2, 1.2, 1.8])
+        with col_sel1:
+            sel_text = f" (**:purple[{len(selected_ids)} selecionada(s)]**)" if selected_ids else ""
+            st.markdown(f"**{len(transactions)} transações encontradas**{sel_text}")
+        with col_sel2:
+            if st.button("☑️ Sel. Página", key="select_page_trans", help="Selecionar todas as transações desta página"):
+                for t in page_transactions:
+                    st.session_state[f"select_trans_{t.id}"] = True
+                st.rerun()
+        with col_sel3:
+            if st.button("☑️ Sel. Todas", key="select_all_trans", help="Selecionar todas as transações filtradas"):
+                for t in transactions:
+                    st.session_state[f"select_trans_{t.id}"] = True
+                st.rerun()
+        with col_sel4:
+            if st.button("⬜ Limpar", key="deselect_all_trans", help="Limpar seleção"):
+                for t in transactions:
+                    st.session_state[f"select_trans_{t.id}"] = False
+                st.rerun()
+        with col_sel5:
+            if selected_ids:
+                if st.button(f"🗑️ Excluir ({len(selected_ids)})", key="btn_del_selected_trans", type="primary", use_container_width=True):
+                    st.session_state.confirm_delete_trans = True
+
+        if st.session_state.get("confirm_delete_trans", False):
+            if selected_ids:
+                st.warning(f"⚠️ **Atenção:** Tem certeza que deseja excluir **{len(selected_ids)}** transação(ões) selecionada(s)? Esta ação é irreversível.")
+                col_c1, col_c2 = st.columns(2)
+                with col_c1:
+                    if st.button("🔥 Confirmar Exclusão em Lote", key="confirm_delete_trans_yes", type="primary", use_container_width=True):
+                        try:
+                            session.query(Transaction).filter(Transaction.id.in_(selected_ids)).delete(synchronize_session=False)
+                            session.commit()
+                            for t_id in selected_ids:
+                                st.session_state[f"select_trans_{t_id}"] = False
+                            st.session_state.trans_bulk_deleted_count = len(selected_ids)
+                            st.session_state.confirm_delete_trans = False
+                            st.rerun()
+                        except Exception as e:
+                            session.rollback()
+                            st.error(f"Erro ao excluir transações: {e}")
+                with col_c2:
+                    if st.button("❌ Cancelar", key="confirm_delete_trans_no", use_container_width=True):
+                        st.session_state.confirm_delete_trans = False
+                        st.rerun()
+            else:
+                st.session_state.confirm_delete_trans = False
+
+        filter_info = f" que contêm **\"{filter_desc}\"**" if filter_desc else " listadas"
+        expander_label = f"⚡ Alteração em lote (" + (f"{len(selected_ids)} selecionadas" if selected_ids else f"{len(transactions)} transações") + ")"
+        with st.expander(expander_label):
+            all_categories = income_categories + expense_categories
+            if selected_ids:
+                st.info(f"Alterar categoria das **{len(selected_ids)}** transações selecionadas")
+                target_trans = [t for t in transactions if t.id in selected_ids]
+            else:
+                st.info(f"Alterar categoria de todas as {len(transactions)} transações{filter_info}")
+                target_trans = transactions
+            
+            col_bulk1, col_bulk2 = st.columns([3, 1])
+            with col_bulk1:
+                bulk_cat_options = ["Sem categoria"] + [c.name for c in all_categories]
+                bulk_new_cat = st.selectbox("Nova categoria", bulk_cat_options, key="bulk_trans_cat")
+            with col_bulk2:
+                st.write("")
+                st.write("")
+                if st.button("✅ Aplicar", key="apply_bulk_trans_cat", use_container_width=True):
+                    try:
+                        if bulk_new_cat == "Sem categoria":
+                            new_cat_id = None
+                        else:
+                            selected_cat = next((c for c in all_categories if c.name == bulk_new_cat), None)
+                            new_cat_id = selected_cat.id if selected_cat else None
+                        
+                        for t in target_trans:
+                            t.category_id = new_cat_id
+                        session.commit()
+                        st.toast(f"✅ {len(target_trans)} transações atualizadas!", icon="✅")
+                        st.rerun()
+                    except Exception as e:
+                        session.rollback()
+                        st.error(f"Erro ao alterar categoria: {e}")
+
         all_categories = income_categories + expense_categories
         cat_options = ["Sem categoria"] + [c.name for c in all_categories]
 
@@ -206,7 +270,10 @@ with tab_list:
             color = "green" if t.transaction_type == TransactionType.INCOME else "red"
             signal = "+" if t.transaction_type == TransactionType.INCOME else "-"
             
-            col_date, col_desc, col_cat, col_val, col_edit = st.columns([1.5, 3, 2.5, 1.5, 0.5])
+            col_chk, col_date, col_desc, col_cat, col_val, col_edit = st.columns([0.4, 1.5, 3, 2.5, 1.5, 0.5])
+            
+            with col_chk:
+                st.checkbox("sel", key=f"select_trans_{t.id}", label_visibility="collapsed")
             
             with col_date:
                 st.write(t.date.strftime("%d/%m/%Y"))

@@ -242,6 +242,8 @@ def _parse_bradesco_cc_pdf(file_bytes: bytes, ref_month: int, ref_year: int, adj
         
         if not line:
             continue
+            
+        line = re.sub(r"1FP[A-Z0-9\s]+$", "", line).strip()
         
         should_skip = False
         for pattern in skip_patterns:
@@ -261,30 +263,37 @@ def _parse_bradesco_cc_pdf(file_bytes: bytes, ref_month: int, ref_year: int, adj
         match_value = re.search(pattern_value_end, rest)
         
         if not match_value:
-            if i < len(lines):
+            lookahead_count = 0
+            while not match_value and lookahead_count < 3 and i < len(lines):
                 next_line = lines[i].strip()
-                if not re.match(r"^\d{2}/\d{2}", next_line) and not any(re.search(p, next_line, re.IGNORECASE) for p in skip_patterns):
-                    m_frac = None
-                    for den_len in (1, 2):
-                        for num_len in (1, 2):
-                            pat = rf"^(\d{{{num_len}}}/\d{{{den_len}}})(-?\s*[\d.]+,\d{{2}}\s*-?)$"
-                            m_tmp = re.match(pat, next_line)
-                            if m_tmp:
-                                n_num, n_den = map(int, m_tmp.group(1).split("/"))
-                                if n_num <= n_den and n_den <= 60:
-                                    m_frac = m_tmp
-                                    break
-                        if m_frac:
-                            break
-                    if not m_frac:
-                        m_frac = re.match(r"^(\d+/\d+)\s*(-?\s*[\d.]+,\d{2}\s*-?)$", next_line)
-
-                    if m_frac:
-                        rest = rest + " " + m_frac.group(1) + " " + m_frac.group(2)
-                    else:
-                        rest = rest + " " + next_line
+                if not next_line:
                     i += 1
-                    match_value = re.search(pattern_value_end, rest)
+                    continue
+                if re.match(r"^\d{2}/\d{2}", next_line) or any(re.search(p, next_line, re.IGNORECASE) for p in skip_patterns):
+                    break
+                
+                m_frac = None
+                for den_len in (1, 2):
+                    for num_len in (1, 2):
+                        pat = rf"^(\d{{{num_len}}}/\d{{{den_len}}})(-?\s*[\d.]+,\d{{2}}\s*-?)$"
+                        m_tmp = re.match(pat, next_line)
+                        if m_tmp:
+                            n_num, n_den = map(int, m_tmp.group(1).split("/"))
+                            if n_num <= n_den and n_den <= 60:
+                                m_frac = m_tmp
+                                break
+                    if m_frac:
+                        break
+                if not m_frac:
+                    m_frac = re.match(r"^(\d+/\d+)\s*(-?\s*[\d.]+,\d{2}\s*-?)$", next_line)
+
+                if m_frac:
+                    rest = rest + " " + m_frac.group(1) + " " + m_frac.group(2)
+                else:
+                    rest = rest + " " + next_line
+                i += 1
+                lookahead_count += 1
+                match_value = re.search(pattern_value_end, rest)
         
         if not match_value:
             continue
@@ -841,9 +850,16 @@ with tab_nubank_cc:
             cards = session.query(CreditCard).all()
             if cards:
                 card_options = {c.name: c.id for c in cards}
+                card_names = list(card_options.keys())
+                nubank_idx = 0
+                for idx, name in enumerate(card_names):
+                    if "nubank" in name.lower():
+                        nubank_idx = idx
+                        break
                 selected_nubank_card = st.selectbox(
                     "Selecione o cartão para importar",
-                    list(card_options.keys()),
+                    card_names,
+                    index=nubank_idx,
                     key="nubank_card_select"
                 )
             else:

@@ -24,13 +24,23 @@ with col_filter1:
 with col_filter2:
     period_type = st.selectbox(
         "Período",
-        ["Último mês", "Últimos 3 meses", "Últimos 6 meses", "Último ano", "Personalizado"],
+        ["Mês atual", "Último mês", "Últimos 3 meses", "Últimos 6 meses", "Último ano", "Personalizado"],
         key="analytics_period"
     )
 
-if period_type == "Último mês":
-    end_date = today
+if period_type == "Mês atual":
     start_date = date(today.year, today.month, 1)
+    if today.month == 12:
+        end_date = date(today.year, 12, 31)
+    else:
+        end_date = date(today.year, today.month + 1, 1) - timedelta(days=1)
+elif period_type == "Último mês":
+    if today.month == 1:
+        start_date = date(today.year - 1, 12, 1)
+        end_date = date(today.year - 1, 12, 31)
+    else:
+        start_date = date(today.year, today.month - 1, 1)
+        end_date = date(today.year, today.month, 1) - timedelta(days=1)
 elif period_type == "Últimos 3 meses":
     end_date = today
     start_date = date(today.year, today.month, 1) - timedelta(days=90)

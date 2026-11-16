@@ -20,6 +20,8 @@ if "cc_trans_updated" not in st.session_state:
     st.session_state.cc_trans_updated = False
 if "cc_trans_deleted" not in st.session_state:
     st.session_state.cc_trans_deleted = False
+if "cc_trans_bulk_deleted_count" not in st.session_state:
+    st.session_state.cc_trans_bulk_deleted_count = 0
 
 def clear_card_form():
     keys_to_clear = ["new_card_name"]
@@ -49,6 +51,10 @@ if st.session_state.cc_trans_updated:
 if st.session_state.cc_trans_deleted:
     st.toast("🗑️ Transação excluída!", icon="🗑️")
     st.session_state.cc_trans_deleted = False
+
+if st.session_state.cc_trans_bulk_deleted_count > 0:
+    st.toast(f"🗑️ {st.session_state.cc_trans_bulk_deleted_count} transações de cartão excluídas em lote!", icon="🗑️")
+    st.session_state.cc_trans_bulk_deleted_count = 0
 
 tab_cards, tab_transactions, tab_add_card, tab_add_trans = st.tabs([
     "💳 Meus Cartões", "📋 Transações", "➕ Novo Cartão", "➕ Nova Transação"
@@ -211,33 +217,6 @@ with tab_transactions:
     st.metric("Total do Mês", f"R$ {total_month:,.2f}")
     
     if transactions:
-        filter_info = f" que contêm **\"{filter_desc}\"**" if filter_desc else " listadas"
-        with st.expander(f"⚡ Alteração em lote ({len(transactions)} transações)"):
-            st.info(f"Alterar categoria de todas as {len(transactions)} transações{filter_info}")
-            
-            col_bulk1, col_bulk2 = st.columns([3, 1])
-            with col_bulk1:
-                bulk_cat_options = ["Sem categoria"] + [c.name for c in cc_categories]
-                bulk_new_cat = st.selectbox("Nova categoria", bulk_cat_options, key="bulk_cc_cat")
-            with col_bulk2:
-                st.write("")
-                st.write("")
-                if st.button("✅ Aplicar a todas", key="apply_bulk_cc_cat", use_container_width=True):
-                    if bulk_new_cat == "Sem categoria":
-                        new_cat_id = None
-                    else:
-                        selected_cat = next((c for c in cc_categories if c.name == bulk_new_cat), None)
-                        new_cat_id = selected_cat.id if selected_cat else None
-                    
-                    for t in transactions:
-                        t.category_id = new_cat_id
-                    session.commit()
-                    st.toast(f"✅ {len(transactions)} transações atualizadas!", icon="✅")
-                    st.rerun()
-    
-    st.markdown("---")
-    
-    if transactions:
         pagination_sig = (filter_month, filter_year, filter_card, filter_desc, filter_no_category)
         if st.session_state.get("cc_trans_pagination_sig") != pagination_sig:
             st.session_state.cc_trans_pagination_sig = pagination_sig
@@ -255,10 +234,99 @@ with tab_transactions:
 
         page_transactions = transactions[start_idx:end_idx]
 
+        selected_cc_ids = [t.id for t in transactions if st.session_state.get(f"select_cc_trans_{t.id}", False)]
+
+        col_sel1, col_sel2, col_sel3, col_sel4, col_sel5 = st.columns([3, 1.2, 1.2, 1.2, 1.8])
+        with col_sel1:
+            sel_text = f" (**:purple[{len(selected_cc_ids)} selecionada(s)]**)" if selected_cc_ids else ""
+            st.markdown(f"**{len(transactions)} transações de cartão encontradas**{sel_text}")
+        with col_sel2:
+            if st.button("☑️ Sel. Página", key="select_page_cc_trans", help="Selecionar todas as transações desta página"):
+                for t in page_transactions:
+                    st.session_state[f"select_cc_trans_{t.id}"] = True
+                st.rerun()
+        with col_sel3:
+            if st.button("☑️ Sel. Todas", key="select_all_cc_trans", help="Selecionar todas as transações de cartão filtradas"):
+                for t in transactions:
+                    st.session_state[f"select_cc_trans_{t.id}"] = True
+                st.rerun()
+        with col_sel4:
+            if st.button("⬜ Limpar", key="deselect_all_cc_trans", help="Limpar seleção"):
+                for t in transactions:
+                    st.session_state[f"select_cc_trans_{t.id}"] = False
+                st.rerun()
+        with col_sel5:
+            if selected_cc_ids:
+                if st.button(f"🗑️ Excluir ({len(selected_cc_ids)})", key="btn_del_selected_cc_trans", type="primary", use_container_width=True):
+                    st.session_state.confirm_delete_cc_trans = True
+
+        if st.session_state.get("confirm_delete_cc_trans", False):
+            if selected_cc_ids:
+                st.warning(f"⚠️ **Atenção:** Tem certeza que deseja excluir **{len(selected_cc_ids)}** transação(ões) de cartão selecionada(s)? Esta ação é irreversível.")
+                col_c1, col_c2 = st.columns(2)
+                with col_c1:
+                    if st.button("🔥 Confirmar Exclusão em Lote", key="confirm_delete_cc_trans_yes", type="primary", use_container_width=True):
+                        try:
+                            session.query(CreditCardTransaction).filter(CreditCardTransaction.id.in_(selected_cc_ids)).delete(synchronize_session=False)
+                            session.commit()
+                            for t_id in selected_cc_ids:
+                                st.session_state[f"select_cc_trans_{t_id}"] = False
+                            st.session_state.cc_trans_bulk_deleted_count = len(selected_cc_ids)
+                            st.session_state.confirm_delete_cc_trans = False
+                            st.rerun()
+                        except Exception as e:
+                            session.rollback()
+                            st.error(f"Erro ao excluir transações de cartão: {e}")
+                with col_c2:
+                    if st.button("❌ Cancelar", key="confirm_delete_cc_trans_no", use_container_width=True):
+                        st.session_state.confirm_delete_cc_trans = False
+                        st.rerun()
+            else:
+                st.session_state.confirm_delete_cc_trans = False
+
+        filter_info = f" que contêm **\"{filter_desc}\"**" if filter_desc else " listadas"
+        expander_label = f"⚡ Alteração em lote (" + (f"{len(selected_cc_ids)} selecionadas" if selected_cc_ids else f"{len(transactions)} transações") + ")"
+        with st.expander(expander_label):
+            if selected_cc_ids:
+                st.info(f"Alterar categoria das **{len(selected_cc_ids)}** transações de cartão selecionadas")
+                target_trans = [t for t in transactions if t.id in selected_cc_ids]
+            else:
+                st.info(f"Alterar categoria de todas as {len(transactions)} transações{filter_info}")
+                target_trans = transactions
+
+            col_bulk1, col_bulk2 = st.columns([3, 1])
+            with col_bulk1:
+                bulk_cat_options = ["Sem categoria"] + [c.name for c in cc_categories]
+                bulk_new_cat = st.selectbox("Nova categoria", bulk_cat_options, key="bulk_cc_cat")
+            with col_bulk2:
+                st.write("")
+                st.write("")
+                if st.button("✅ Aplicar", key="apply_bulk_cc_cat", use_container_width=True):
+                    try:
+                        if bulk_new_cat == "Sem categoria":
+                            new_cat_id = None
+                        else:
+                            selected_cat = next((c for c in cc_categories if c.name == bulk_new_cat), None)
+                            new_cat_id = selected_cat.id if selected_cat else None
+                        
+                        for t in target_trans:
+                            t.category_id = new_cat_id
+                        session.commit()
+                        st.toast(f"✅ {len(target_trans)} transações atualizadas!", icon="✅")
+                        st.rerun()
+                    except Exception as e:
+                        session.rollback()
+                        st.error(f"Erro ao alterar categoria: {e}")
+
+        st.markdown("---")
+
         cat_options = ["Sem categoria"] + [c.name for c in cc_categories]
         
         for t in page_transactions:
-            col_date, col_desc, col_cat, col_val, col_edit = st.columns([1.5, 3, 2.5, 1.5, 0.5])
+            col_chk, col_date, col_desc, col_cat, col_val, col_edit = st.columns([0.4, 1.5, 3, 2.5, 1.5, 0.5])
+            
+            with col_chk:
+                st.checkbox("sel", key=f"select_cc_trans_{t.id}", label_visibility="collapsed")
             
             with col_date:
                 st.write(t.date.strftime("%d/%m/%Y"))

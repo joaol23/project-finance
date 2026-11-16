@@ -17,6 +17,17 @@ O **Organizador Financeiro** é uma aplicação web de finanças pessoais desenv
 6. **Investimentos**: Monitoramento de Ações, FIIs e Criptomoedas, cálculo automático de preço médio (PM), rentabilidade, lucro realizado e não realizado, integração com scraping de cotações da B3.
 7. **Análises Avançadas**: Gráfico de Pareto (80/20), detecção de transações anômalas, receitas vs despesas histórico, e top gastos.
 8. **Importação**: Processamento de arquivos Excel (modelo próprio), CSV Nubank, CSV Bradesco e PDF Bradesco.
+9. **Aplicativo Mobile Integrado**: Versão móvel desenvolvida em Flet com total alinhamento de funcionalidades e base de dados.
+
+---
+
+## 📱 Arquitetura Mobile (Flet) & Alinhamento PC/Mobile
+
+O projeto conta com um aplicativo móvel (localizado na pasta `/mobile`) projetado para manter a **mesma regra de negócios e conectividade direta com o banco da versão Desktop/Web**.
+* **Framework**: Desenvolvido usando **Flet** (suporta builds para Android/iOS e compilação de UI baseada em Python).
+* **Banco de Dados Compartilhado**: O app interage com a base de dados via arquivo local, usando um utilitário na interface (`setup.py`) onde o usuário escolhe o `financas.db`. Na prática, o arquivo SQLite será sincronizado através de serviços de nuvem (ex: Google Drive / DropSync).
+* **Alinhamento de Funcionalidades**: **Tudo que existe no PC (Web) deve existir no Mobile e vice-versa**. O módulo Mobile consome os mesmos modelos declarativos localizados em `database/models.py`.
+* **Módulos do App**: `/mobile/main.py` (App Root/Roteamento), `/mobile/state.py` (Global State para Períodos e Seleção), e arquivos espelhados em `/mobile/views/*`.
 
 ---
 

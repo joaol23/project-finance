@@ -54,9 +54,14 @@ projeto-finança/
 ├── app.py              # Aplicação principal Streamlit
 ├── database/           # Modelos e conexão com banco de dados
 │   ├── __init__.py
-│   ├── models.py       # Modelos SQLAlchemy
+│   ├── models.py       # Modelos SQLAlchemy (COMPARTILHADO)
 │   └── connection.py   # Configuração do banco
-├── views/              # Telas da aplicação
+├── mobile/             # Aplicativo Mobile (Flet)
+│   ├── main.py         # Arquivo principal do aplicativo
+│   ├── state.py        # Estado global e alinhamento de regras
+│   ├── styles.py       # Estilização do aplicativo
+│   └── views/          # Telas do aplicativo móvel
+├── views/              # Telas da aplicação Web
 │   ├── dashboard.py    # Painel principal
 │   ├── transactions.py # Gestão de transações
 │   ├── categories.py   # Gestão de categorias
@@ -70,6 +75,21 @@ projeto-finança/
 ├── data/               # Banco de dados SQLite
 ├── requirements.txt    # Dependências Python
 └── README.md
+```
+
+## 📱 Aplicativo Mobile
+
+O projeto conta também com uma versão mobile desenvolvida com o framework **Flet**, desenhada para rodar em Android e iOS. 
+
+**Princípio de Alinhamento**: As versões Web (PC) e Mobile mantêm funcionalidades alinhadas e compartilham da mesma estrutura de banco de dados (`financas.db`) e dos mesmos modelos via SQLAlchemy.
+- A sincronização de dados ocorre por meio do compartilhamento do arquivo `financas.db` (ex. sincronizando-o via Google Drive ou iCloud). 
+- O Mobile herda todas as regras complexas de negócio, como contagem de períodos contábeis e categorizações.
+
+### Executando o App Localmente
+
+```bash
+# Com o ambiente virtual ativado:
+flet run mobile/main.py
 ```
 
 ## Como Funciona o Módulo de Investimentos

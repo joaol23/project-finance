@@ -36,6 +36,20 @@ engine = create_engine(f"sqlite:///{DATABASE_PATH}", echo=False)
 SessionLocal = sessionmaker(bind=engine)
 
 
+def set_database_path(path: str):
+    """Reconfigura o engine e SessionLocal para um novo arquivo de banco de dados.
+    
+    Usado pelo app mobile para trocar o banco em tempo de execução após o usuário
+    selecionar o arquivo financas.db via FilePicker.
+    """
+    global DATABASE_PATH, engine, SessionLocal
+    DATABASE_PATH = path
+    engine = create_engine(f"sqlite:///{path}", echo=False)
+    SessionLocal = sessionmaker(bind=engine)
+    Base.metadata.create_all(engine)
+    _seed_initial_data()
+
+
 def init_db():
     Base.metadata.create_all(engine)
     _seed_initial_data()
